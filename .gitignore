@@ -1,0 +1,36 @@
+# Abhängigkeiten
+node_modules/
+
+# Build-Artefakte
+dist/
+*.tsbuildinfo
+# veralteter Build-Schnappschuss (root-owned, manuell zu löschen)
+frontend/.dist-stale-ignored/
+.dist-stage/
+.dist-old/
+
+# Generierte Config-Kompilate (vite.config.js entsteht durch tsc neben vite.config.ts)
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Laufzeit-Secrets
+.env
+.env.*
+!.env.example
+
+# Benutzer-Uploads (Dokumente, Logos) niemals versionieren
+backend/uploads/
+uploads/
+
+# Backups
+backups/
+*.tar.gz
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

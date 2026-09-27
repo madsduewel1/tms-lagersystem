@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>10×10 Grid</title>
+  <style>
+    /* ---------- Basics ---------- */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #101014;
+      color: #e8e8ee;
+      padding: 24px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 560px;
+      background: #17171d;
+      border: 1px solid #2a2a33;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    /* ---------- Header ---------- */
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    header h1 span { color: #7aa2ff; }
+
+    .stats { font-size: 13px; color: #9aa0ad; }
+
+    /* ---------- Controls ---------- */
+    .controls {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    button {
+      font: inherit;
+      font-size: 13px;
+      padding: 7px 14px;
+      border-radius: 8px;
+      border: 1px solid #33333d;
+      background: #202028;
+      color: #e8e8ee;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    button:hover { border-color: #7aa2ff; background: #262630; }
+    button:active { transform: translateY(1px); }
+
+    .checkerboard-wrap {
+      aspect-ratio: 1;
+      border: 1px solid #2a2a33;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    /* ---------- The Grid ---------- */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      grid-template-rows: repeat(10, 1fr);
+      width: 100%;
+      height: 100%;
+      gap: 0;
+    }
+
+    .cell {
+      background: #202028;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+
+    .cell:hover { background: #2c2c38; }
+
+    .cell.active { background: #7aa2ff; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <header>
+      <h1>10×10 <span>Grid</span></h1>
+      <span class="stats" id="stats">0 / 100 Zellen aktiv</span>
+    </header>
+
+    <div class="controls">
+      <button id="btn-all" type="button">Alle füllen</button>
+      <button id="btn-clear" type="button">Leeren</button>
+      <button id="btn-random" type="button">Zufall</button>
+    </div>
+
+    <div class="checkerboard-wrap">
+      <div class="grid" id="grid" aria-label="10 mal 10 Raster"></div>
+    </div>
+
+    <p class="stats" style="margin-top: 16px; text-align: center">
+      100 Zellen – klicke eine Zelle an, um sie zu aktivieren
+    </p>
+  </main>
+
+  <script>
+    const GRID = 10; // 10 Zeilen × 10 Spalten
+    const grid = document.getElementById('grid');
+    const stats = document.getElementById('stats');
+
+    function buildCells() {
+      grid.innerHTML = '';
+      for (let i = 0; i < GRID * GRID; i++) {
+        const cell = document.createElement('button');
+        cell.type = 'button';
+        cell.className = 'cell';
+        cell.setAttribute('aria-label', `Zelle ${i + 1}`);
+        cell.addEventListener('click', () => {
+          cell.classList.toggle('active');
+          updateStats();
+        });
+        grid.appendChild(cell);
+      }
+    }
+
+    function setAll(active) {
+      grid.querySelectorAll('.cell').forEach((c) =>
+        c.classList.toggle('active', active)
+      );
+      updateStats();
+    }
+
+    function randomize() {
+      grid.querySelectorAll('.cell').forEach((c) =>
+        c.classList.toggle('active', Math.random() > 0.5)
+      );
+      updateStats();
+    }
+
+    function updateStats() {
+      const active = grid.querySelectorAll('.cell.active').length;
+      stats.textContent = `${active} / ${GRID * GRID} Zellen aktiv`;
+    }
+
+    document.getElementById('btn-all').addEventListener('click', () => setAll(true));
+    document.getElementById('btn-clear').addEventListener('click', () => setAll(false));
+    document.getElementById('btn-random').addEventListener('click', randomize);
+
+    buildCells();
+    updateStats();
+  </script>
+</body>
+</html>
