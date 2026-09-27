@@ -45,7 +45,10 @@ setupRouter.post('/init', validate(initSchema), async (req, res, next) => {
     // Namens-Sperre auf `users` serialisiert gleichzeitige Ersteinrichtungen.
     // Ohne diese Sperre konnten zwei parallele Requests beide `userCount() === 0`
     // sehen und je einen Administrator anlegen.
-    await connection.query('LOCK TABLES users WRITE');
+    // `roles` muss mitgesperrt werden: darunter liegt eine Subquery, und bei
+    // aktivem LOCK TABLES ist jeder Zugriff auf eine nicht gesperrte Tabelle
+    // ein Fehler ("Table 'roles' was not locked with LOCK TABLES", errno 1100).
+    await connection.query('LOCK TABLES users WRITE, roles READ');
     try {
       const [countRows] = await connection.query<SqlRow<{ count: number }>[]>(
         'SELECT COUNT(*) AS count FROM users'
