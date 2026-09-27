@@ -152,8 +152,10 @@ sync_env_file() {
   if [[ "${added}" -gt 0 ]]; then
     ok "${added} fehlende Konfigurationsschlüssel aus .env.example ergänzt"
   fi
-  chmod 640 "${ENV_FILE}" "${ENV_FILE}.bak"
-  chown "${TMS_USER}:${TMS_USER}" "${ENV_FILE}" "${ENV_FILE}.bak" 2>/dev/null || true
+  local files=("${ENV_FILE}")
+  [[ -f "${ENV_FILE}.bak" ]] && files+=("${ENV_FILE}.bak")
+  chmod 640 "${files[@]}"
+  chown "${TMS_USER}:${TMS_USER}" "${files[@]}" 2>/dev/null || true
   ok "backend/.env synchronisiert"
 }
 
