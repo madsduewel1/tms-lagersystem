@@ -46,6 +46,14 @@ interface UserRow {
 
 const availableRoles = ['administrator', 'techniker'] as const;
 
+type UserReferenceEffect = 'entfernt' | 'ohne_zuordnung';
+
+interface UserReference {
+  key: string;
+  count: number;
+  effect: UserReferenceEffect;
+}
+
 /**
  * Temporäres Passwort. Bewusst ohne verwechselbare Zeichen und deutlich länger
  * als die früheren 6 Ziffern (900.000 Kombinationen waren ohne Rate-Limit auf
@@ -279,3 +287,143 @@ async function reqUserRow(id: number): Promise<UserRow | null> {
   );
   return ((rows as UserRow[])[0] ?? null) as UserRow | null;
 }
+
+/**
+ * Zählt alle Datensätze, die über einen Fremdschlüssel auf den Benutzer
+ * verweisen – Grundlage für die Rückfrage vor dem Löschen.
+ *
+ * `effect` beschreibt, was das Löschen mit den Zählern macht:
+ * - `entfernt`: ON DELETE CASCADE, der Datensatz verschwindet
+ * - `ohne_zuordnung`: ON DELETE SET NULL, der Datensatz bleibt, verliert aber
+ *   den Bezug zum gelöschten Benutzer
+ */
+async function userReferences(id: number): Promise<UserReference[]> {
+  const [rows] = await pool.query(
+    `SELECT
+       (SELECT COUNT(*) FROM audit_logs        WHERE user_id       = ?) AS audit_logs,
+       (SELECT COUNT(*) FROM events             WHERE created_by    = ?) AS events,
+       (SELECT COUNT(*) FROM event_editors      WHERE user_id       = ?) AS event_editors,
+       (SELECT COUNT(*) FROM stock_movements    WHERE user_id       = ?) AS stock_movements,
+       (SELECT COUNT(*) FROM checkouts          WHERE user_id       = ?) AS checkouts,
+       (SELECT COUNT(*) FROM returns            WHERE user_id       = ?) AS returns,
+       (SELECT COUNT(*) FROM maintenance        WHERE reported_by    = ? OR technician_id = ?) AS maintenance,
+       (SELECT COUNT(*) FROM maintenance_logs   WHERE user_id       = ?) AS maintenance_logs,
+       (SELECT COUNT(*) FROM purchases          WHERE created_by    = ?) AS purchases,
+       (SELECT COUNT(*) FROM documents          WHERE uploaded_by   = ?) AS documents,
+       (SELECT COUNT(*) FROM inventory_sessions WHERE created_by    = ?) AS inventory_sessions,
+       (SELECT COUNT(*) FROM inventory_counts   WHERE counted_by    = ?) AS inventory_counts`,
+    [id, id, id, id, id, id, id, id, id, id, id, id, id]
+  );
+  const counts = (rows as Array<Record<string, number>>)[0] ?? {};
+  return (Object.keys(counts) as Array<keyof typeof counts>).map((key) => ({
+    key,
+    count: Number(counts[key] ?? 0),
+    // event_editors.user_id ist NOT NULL, kann also nicht auf NULL gesetzt
+    // werden und ist deshalb als einziger Verweis ON DELETE CASCADE.
+    effect: key === 'event_editors' ? 'entfernt' : 'ohne_zuordnung',
+  }));
+}
+
+/**
+ * Anzahl der aktiven Administratoren ohne den Benutzer `excludeId`.
+ *
+ * Inaktive Administratoren zählen nicht mit: sie können sich nicht anmelden
+ * und damit auch keine Rechte vergeben. Bliebe nach dem Löschen keiner übrig,
+ * wäre die Benutzerverwaltung für niemanden mehr erreichbar.
+ */
+async function remainingActiveAdmins(excludeId: number): Promise<number> {
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS total
+     FROM users u
+     JOIN roles r ON r.id = u.role_id
+     WHERE r.name = 'administrator' AND u.active = 1 AND u.id <> ?`,
+    [excludeId]
+  );
+  return Number((rows as Array<{ total: number }>)[0]?.total ?? 0);
+}
+
+/** Sperrgrund für das Löschen – leer, wenn das Löschen erlaubt ist. */
+async function deleteBlocker(target: UserRow, ownId: number): Promise<string> {
+  if (target.id === ownId) {
+    return 'Du kannst dein eigenes Konto nicht löschen.';
+  }
+  if (target.role === 'administrator' && (await remainingActiveAdmins(target.id)) === 0) {
+    return 'Dieser Benutzer ist der letzte aktive Administrator. Ohne ihn wäre niemand mehr in der Lage, die Benutzerverwaltung zu öffnen.';
+  }
+  return '';
+}
+
+usersRouter.get('/:id/deletion-impact', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Ungültige Benutzer-ID');
+    const target = await reqUserRow(id);
+    if (!target) throw new HttpError(404, 'Benutzer nicht gefunden');
+
+    res.json({
+      user: {
+        id: target.id,
+        username: target.username,
+        name: target.name,
+        role: target.role,
+        active: target.active,
+      },
+      blocked: await deleteBlocker(target, req.user!.id),
+      references: await userReferences(id),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+usersRouter.delete('/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Ungültige Benutzer-ID');
+    const target = await reqUserRow(id);
+    if (!target) throw new HttpError(404, 'Benutzer nicht gefunden');
+
+    const blocked = await deleteBlocker(target, req.user!.id);
+    if (blocked) throw new HttpError(400, blocked);
+
+    // Zähler vor dem Löschen lesen – danach ist der Benutzer nicht mehr
+    // auffindbar und die Werte landen im Audit-Eintrag.
+    const references = await userReferences(id);
+
+    // Alle Fremdschlüssel auf users(id) haben eine ON DELETE-Aktion, der
+    // Datensatz lässt sich also ohne Vorwarnung entfernen. Ein Fehler aus der
+    // Datenbank käme trotzdem als 500er ohne Ursache an, deshalb wird errno
+    // 1451/1452 (FK verletzt) auf eine verständliche Meldung abgebildet.
+    try {
+      await pool.query('DELETE FROM users WHERE id = ?', [id]);
+    } catch (err) {
+      const errno = (err as { errno?: number }).errno;
+      if (errno === 1451 || errno === 1452) {
+        throw new HttpError(
+          409,
+          'Der Benutzer ist noch mit anderen Datensätzen verknüpft. Bitte zuerst diese Verknüpfungen prüfen.'
+        );
+      }
+      throw err;
+    }
+
+    await writeAudit({
+      userId: req.user!.id,
+      action: 'user_deleted',
+      targetType: 'user',
+      targetId: String(id),
+      // Benutzername und Name wandern mit in den Audit-Eintrag: durch
+      // ON DELETE SET NULL steht dort danach nur noch eine unlesbare ID.
+      details: {
+        username: target.username,
+        name: target.name,
+        role: target.role,
+        references: Object.fromEntries(references.map((r) => [r.key, r.count])),
+      },
+      ip: req.ip,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});

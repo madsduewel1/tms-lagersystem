@@ -8,6 +8,7 @@ const actionLabels: Record<string, string> = {
   setup_complete: 'Ersteinrichtung',
   user_created: 'Benutzer erstellt',
   user_updated: 'Benutzer geändert',
+  user_deleted: 'Benutzer gelöscht',
   user_password_reset: 'Passwort zurückgesetzt',
   user_password_bulk_reset: 'Passwörter zurückgesetzt',
   profile_updated: 'Profil geändert',

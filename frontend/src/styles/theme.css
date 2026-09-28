@@ -363,6 +363,17 @@ textarea {
   font-size: 12px;
 }
 
+/* Aufzählung in Dialogen, z. B. als Auswirkungsliste vor dem Löschen. */
+.plain-list {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.plain-list li::marker {
+  color: var(--text-secondary);
+}
+
 /* ---------- Table ---------- */
 
 .table-wrap {
@@ -915,19 +926,60 @@ textarea {
   align-items: center;
 }
 
+/* Trigger des Kontomenüs: Name statt Profilbild, Chevron als Toggle-Indikator. */
 .avatar-btn {
   display: flex;
   align-items: center;
   gap: 8px;
   background: transparent;
-  border: none;
-  padding: 4px;
+  border: 1px solid transparent;
+  padding: 6px 10px;
   border-radius: 999px;
   color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
-.avatar-btn:hover {
+.avatar-btn:hover,
+.avatar-btn.active {
+  background: var(--primary);
   color: var(--text);
+  border-color: var(--card-border);
+}
+
+/* Lange Namen dürfen die Kopfzeile nicht aufschieben. */
+.avatar-btn-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar-btn > svg:last-child {
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+
+/* Offenes Menü -> Chevron nach oben. */
+.avatar-btn.active > svg:last-child {
+  transform: rotate(180deg);
+}
+
+/* Steht bewusst hinter den Basisregeln: der Abschnitt „Mobile / Tablet"
+   weiter oben liegt davor, gleiche Spezifität – dort gewinnt die spätere
+   Regel. */
+@media (max-width: 720px) {
+  .avatar-btn {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  /* Auf schmalen Geräten bleibt Platz für Logo und Modul-Button. */
+  .avatar-btn-name {
+    max-width: 92px;
+  }
 }
 
 .avatar {

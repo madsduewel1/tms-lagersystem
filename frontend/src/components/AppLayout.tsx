@@ -122,8 +122,14 @@ function AppLayout() {
 
         <div className="topbar-spacer" />
         <div className="avatar-wrap" ref={menuRef}>
-          <button className="avatar-btn" onClick={() => setMenuOpen((o) => !o)} aria-label="Konto">
-            <span className="avatar">{initialsOf(user?.name ?? user?.username ?? '')}</span>
+          <button
+            className={`avatar-btn${menuOpen ? ' active' : ''}`}
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={`Konto ${user?.name ?? user?.username ?? ''}`}
+          >
+            <span className="avatar-btn-name">{user?.name ?? user?.username}</span>
             <Icon name="chevron-down" size={16} />
           </button>
           {menuOpen && (

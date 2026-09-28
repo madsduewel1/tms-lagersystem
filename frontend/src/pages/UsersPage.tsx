@@ -12,6 +12,33 @@ interface ResetResult {
   tempPassword: string;
 }
 
+interface UserReference {
+  key: string;
+  count: number;
+  effect: 'entfernt' | 'ohne_zuordnung';
+}
+
+interface DeletionImpact {
+  user: { id: number; username: string; name: string; role: RoleName; active: boolean };
+  blocked: string;
+  references: UserReference[];
+}
+
+const referenceLabels: Record<string, string> = {
+  audit_logs: 'Audit-Log-Einträge',
+  events: 'Angelegte Events',
+  event_editors: 'Event-Bearbeiterrechte',
+  stock_movements: 'Bestandsbewegungen',
+  checkouts: 'Ausgaben',
+  returns: 'Rückgaben',
+  maintenance: 'Wartungsvorgänge',
+  maintenance_logs: 'Wartungsverlauf',
+  purchases: 'Bestellungen',
+  documents: 'Dokumente',
+  inventory_sessions: 'Inventuren',
+  inventory_counts: 'Inventurzählungen',
+};
+
 function UsersPage() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -34,6 +61,11 @@ function UsersPage() {
 
   // Passwort zurücksetzen (einzeln / mehrere)
   const [resetResult, setResetResult] = useState<ResetResult[] | null>(null);
+
+  // Löschen mit Rückfrage
+  const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
+  const [impact, setImpact] = useState<DeletionImpact | null>(null);
+  const [impactBusy, setImpactBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -68,6 +100,52 @@ function UsersPage() {
       const allSelected = users.length > 0 && users.every((u) => prev.has(u.id));
       return allSelected ? new Set() : new Set(users.map((u) => u.id));
     });
+  }
+
+  // Inaktive Administratoren zählen nicht mit: sie können sich nicht anmelden
+  // und damit auch keine Rechte vergeben. Spiegelbild der Prüfung im Backend.
+  const activeAdmins = users.filter((u) => u.role === 'administrator' && u.active).length;
+
+  function isLastAdmin(u: UserRow) {
+    return u.role === 'administrator' && u.active && activeAdmins <= 1;
+  }
+
+  async function openDelete(u: UserRow) {
+    setError('');
+    setDeleteTarget(u);
+    setImpact(null);
+    setImpactBusy(true);
+    try {
+      setImpact(await api<DeletionImpact>(`/api/users/${u.id}/deletion-impact`));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Löschen-Vorschau fehlgeschlagen');
+      setDeleteTarget(null);
+    } finally {
+      setImpactBusy(false);
+    }
+  }
+
+  function closeDelete() {
+    setDeleteTarget(null);
+    setImpact(null);
+    setImpactBusy(false);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || !impact || impact.blocked) return;
+    setError('');
+    setBusy(true);
+    try {
+      await api(`/api/users/${deleteTarget.id}`, { method: 'DELETE' });
+      closeDelete();
+      flash('Benutzer gelöscht');
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Löschen fehlgeschlagen');
+      closeDelete();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleCreate(e: FormEvent) {
@@ -203,6 +281,10 @@ function UsersPage() {
       setBusy(false);
     }
   }
+
+  const touchedRefs = impact?.references.filter((r) => r.count > 0) ?? [];
+  const removedRefs = touchedRefs.filter((r) => r.effect === 'entfernt');
+  const detachedRefs = touchedRefs.filter((r) => r.effect === 'ohne_zuordnung');
 
   return (
     <>
@@ -357,12 +439,27 @@ function UsersPage() {
                           Reset
                         </button>
                         <button
-                          className="btn btn-danger"
+                          className="btn"
                           onClick={() => void toggleActive(u)}
                           disabled={u.id === currentUser?.id}
                           title={u.id === currentUser?.id ? 'Kann sich nicht selbst deaktivieren' : undefined}
                         >
                           {u.active ? 'Deaktivieren' : 'Aktivieren'}
+                        </button>
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => void openDelete(u)}
+                          disabled={u.id === currentUser?.id || isLastAdmin(u)}
+                          title={
+                            u.id === currentUser?.id
+                              ? 'Kann das eigene Konto nicht löschen'
+                              : isLastAdmin(u)
+                                ? 'Letzter aktiver Administrator – nicht löschbar'
+                                : 'Endgültig löschen'
+                          }
+                        >
+                          <Icon name="trash" size={15} />
+                          Löschen
                         </button>
                       </div>
                     </td>
@@ -465,6 +562,79 @@ function UsersPage() {
               Erledigt
             </button>
           </div>
+        </Modal>
+      )}
+
+      {deleteTarget && (
+        <Modal title="Benutzer löschen" onClose={closeDelete}>
+          {impactBusy && <p className="form-hint">Auswirkungen werden geprüft …</p>}
+
+          {impact && impact.blocked && (
+            <>
+              <Alert tone="error">{impact.blocked}</Alert>
+              <p className="form-hint" style={{ marginTop: 12 }}>
+                Zum Entziehen des Zugangs reicht „Deaktivieren“ – dabei bleiben alle Daten erhalten.
+              </p>
+              <div className="modal-actions">
+                <button className="btn btn-primary" onClick={closeDelete}>
+                  Verstanden
+                </button>
+              </div>
+            </>
+          )}
+
+          {impact && !impact.blocked && (
+            <>
+              <Alert tone="error">
+                <strong>{impact.user.name}</strong> (@{impact.user.username}) wird endgültig gelöscht.
+                Eine Wiederherstellung ist nicht möglich.
+              </Alert>
+
+              {touchedRefs.length === 0 ? (
+                <p className="form-hint" style={{ marginTop: 12 }}>
+                  Dieser Benutzer ist mit keinerlei Datensätzen verknüpft.
+                </p>
+              ) : (
+                <>
+                  {removedRefs.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <p className="section-title" style={{ margin: '0 0 6px' }}>Werden mitgelöscht</p>
+                      <ul className="plain-list" style={{ margin: 0, paddingLeft: 20 }}>
+                        {removedRefs.map((r) => (
+                          <li key={r.key}>{referenceLabels[r.key] ?? r.key}: {r.count}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {detachedRefs.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <p className="section-title" style={{ margin: '0 0 6px' }}>
+                        Bleiben erhalten, verlieren aber die Zuordnung
+                      </p>
+                      <ul className="plain-list" style={{ margin: 0, paddingLeft: 20 }}>
+                        {detachedRefs.map((r) => (
+                          <li key={r.key}>{referenceLabels[r.key] ?? r.key}: {r.count}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <p className="form-hint" style={{ marginTop: 12 }}>
+                    In diesen Einträgen steht danach kein Benutzername mehr. Für Nachvollziehbarkeit
+                    protokolliert das Audit-Log den Löschvorgang mit Name und Benutzernamen.
+                  </p>
+                </>
+              )}
+
+              <div className="modal-actions">
+                <button className="btn" onClick={closeDelete} disabled={busy}>
+                  Abbrechen
+                </button>
+                <button className="btn btn-danger" onClick={() => void confirmDelete()} disabled={busy}>
+                  {busy ? 'Wird gelöscht …' : 'Endgültig löschen'}
+                </button>
+              </div>
+            </>
+          )}
         </Modal>
       )}
     </>
