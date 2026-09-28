@@ -234,7 +234,7 @@ apply_migrations() {
 last_backup_file=""
 
 run_backup() {
-  local label="${1:-manuell}" stamp sql_dump archive keep
+  local label="${1:-manuell}" stamp sql_dump archive keep caller_umask
   command -v mariadb-dump >/dev/null 2>&1 || fail "mariadb-dump fehlt – Backup nicht möglich."
 
   mkdir -p "${BACKUP_DIR}"
@@ -246,9 +246,15 @@ run_backup() {
   sql_dump="${BACKUP_DIR}/tms-lager_${stamp}.sql"
   archive="${BACKUP_DIR}/tms-lager_${stamp}.tar.gz"
 
+  # Der Dump enthält das Datenbankpasswort und gehört nur für root lesbar.
+  # Der alte umask wird danach unbedingt zurückgesetzt: update.sh sichert vor
+  # dem Build, und ein stehengebliebener 077 ließ tsc danach mit 600 bauen –
+  # der Dienst läuft aber als ${TMS_USER} und konnte die dist nicht lesen.
+  caller_umask="$(umask)"
   umask 077
   mariadb-dump --single-transaction --routines "${DB_NAME}" > "${sql_dump}" \
-    || fail "Datenbank-Dump fehlgeschlagen."
+    || { umask "${caller_umask}"; fail "Datenbank-Dump fehlgeschlagen."; }
+  umask "${caller_umask}"
   [[ -s "${sql_dump}" ]] || fail "Datenbank-Dump ist leer – Abbruch."
   ok "Datenbank gesichert: ${sql_dump} ($(du -h "${sql_dump}" | cut -f1))"
 
@@ -362,6 +368,13 @@ build_project() {
   fi
   rm -rf "${old}" 2>/dev/null \
     || warn "Alter Build nicht restlos entfernbar (falsche Eigentümer?): ${old}"
+
+  # Unabhängig vom umask der aufrufenden Shell: der Dienst läuft als
+  # ${TMS_USER}, das Frontend liefert Apache als www-data aus. Baute tsc mit
+  # 077, startet der Dienst nicht – und node meldet das als MODULE_NOT_FOUND,
+  # was als falscher Pfad fehlgedeutet wird.
+  chmod -R a+rX "${dir}/dist" 2>/dev/null \
+    || fail "${name}: ${dir}/dist ist nicht lesbar – Rechte prüfen (Eigentümer?)."
   ok "${name} gebaut"
 }
 
