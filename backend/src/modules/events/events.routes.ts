@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool, type SqlRow } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireModule } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, parseId } from '../../utils/helpers.js';
@@ -77,14 +77,17 @@ async function clearPlannedCases(eventId: number): Promise<void> {
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
 
-type RoleName = 'administrator' | 'techniker';
+eventsRouter.use(requireModule('events.view', 'events.manage'));
 
 async function loadEditors(eventId: number): Promise<Array<Record<string, unknown>>> {
   const [rows] = await pool.query(
-    `SELECT u.id, u.name, u.username, r.name AS role
+    `SELECT u.id, u.name, u.username,
+            (SELECT GROUP_CONCAT(r.label ORDER BY r.sort SEPARATOR ', ')
+             FROM user_roles ur
+             JOIN roles r ON r.id = ur.role_id
+             WHERE ur.user_id = u.id) AS role
      FROM event_editors ee
      JOIN users u ON u.id = ee.user_id
-     JOIN roles r ON r.id = u.role_id
      WHERE ee.event_id = ?
      ORDER BY u.name`,
     [eventId]
@@ -100,8 +103,8 @@ async function isEditor(eventId: number, userId: number): Promise<boolean> {
   return (rows[0]?.n ?? 0) > 0;
 }
 
-async function canEditEvent(eventId: number, userId: number, role: RoleName): Promise<boolean> {
-  if (role === 'administrator') return true;
+async function canEditEvent(eventId: number, userId: number, isAdmin: boolean): Promise<boolean> {
+  if (isAdmin) return true;
   const [rows] = await pool.query<SqlRow<{ created_by: number | null }>[]>(
     'SELECT created_by FROM events WHERE id = ?',
     [eventId]
@@ -121,9 +124,9 @@ async function replaceEditors(eventId: number, userIds: number[]): Promise<void>
 async function requireEventPermission(
   eventId: number,
   userId: number,
-  role: RoleName
+  isAdmin: boolean
 ): Promise<boolean> {
-  const editable = await canEditEvent(eventId, userId, role);
+  const editable = await canEditEvent(eventId, userId, isAdmin);
   if (!editable) {
     throw new HttpError(403, 'Keine Berechtigung: Nur Ersteller, Bearbeiter oder Admins dürfen dieses Event ändern');
   }
@@ -156,7 +159,7 @@ eventsRouter.get(
     const data = rows as Array<Record<string, unknown>>;
     const events = data.map((row) => {
       const canEdit =
-        req.user!.role === 'administrator' ||
+        req.user!.isAdmin ||
         (typeof row.created_by === 'number' && row.created_by === req.user!.id) ||
         Number(row.user_editor_count ?? 0) > 0;
       const { user_editor_count: _drop, ...rest } = row;
@@ -256,7 +259,7 @@ eventsRouter.get(
       [id]
     );
     const editors = await loadEditors(id);
-    const canEdit = await canEditEvent(id, req.user!.id, req.user!.role as RoleName);
+    const canEdit = await canEditEvent(id, req.user!.id, req.user!.isAdmin);
     res.json({ event, items, devices, checkouts, cases, editors, can_edit: canEdit });
   })
 );
@@ -266,7 +269,7 @@ eventsRouter.patch(
   validate(updateSchema),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const b = req.body as Record<string, unknown>;
     const allowed = [
       'name',
@@ -302,7 +305,7 @@ eventsRouter.patch(
 
     const editorIds = b.editorIds as number[] | undefined;
     if (editorIds !== undefined) {
-      const isAdmin = req.user!.role === 'administrator';
+      const isAdmin = req.user!.isAdmin;
       const cur = await loadEvent(id);
       const isCreator = !!cur && typeof cur.created_by === 'number' && cur.created_by === req.user!.id;
       if (!isAdmin && !isCreator) {
@@ -327,7 +330,7 @@ eventsRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const [result] = await pool.query('DELETE FROM events WHERE id = ?', [id]);
     if ((result as { affectedRows: number }).affectedRows === 0) {
       throw new HttpError(404, 'Event nicht gefunden');
@@ -348,7 +351,7 @@ eventsRouter.post(
   validate(planItemSchema),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const { item_id, quantity, note } = req.body as {
       item_id: number;
       quantity: number;
@@ -384,7 +387,7 @@ eventsRouter.delete(
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const itemId = parseId(req.params.itemId, 'Artikel-ID');
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     await pool.query('DELETE FROM event_items WHERE event_id = ? AND item_id = ?', [id, itemId]);
     res.json({ ok: true });
   })
@@ -395,7 +398,7 @@ eventsRouter.post(
   validate(planDeviceSchema),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const { item_id, quantity, note } = req.body as {
       item_id: number;
       quantity: number;
@@ -438,7 +441,7 @@ eventsRouter.delete(
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const itemId = parseId(req.params.itemId, 'Geräte-ID');
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     await pool.query('DELETE FROM event_devices WHERE event_id = ? AND item_id = ?', [id, itemId]);
     await pool.query(
       `UPDATE items SET current_event_id = NULL, status = 'verfuegbar'
@@ -455,7 +458,7 @@ eventsRouter.patch(
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const itemId = parseId(req.params.itemId, 'Geräte-ID');
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const { quantity } = req.body as { quantity: number };
     const [result] = await pool.query(
       'UPDATE event_devices SET quantity = ? WHERE event_id = ? AND item_id = ?',
@@ -519,7 +522,7 @@ eventsRouter.post(
   validate(planCaseSchema),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const { case_id, note } = req.body as { case_id: number; note?: string | null };
     const [cases] = await pool.query<SqlRow<{ ok: number }>[]>(
       'SELECT 1 AS ok FROM cases WHERE id = ?',
@@ -549,7 +552,7 @@ eventsRouter.delete(
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const caseId = parseId(req.params.caseId, 'Case-ID');
-    await requireEventPermission(id, req.user!.id, req.user!.role as RoleName);
+    await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     await pool.query('DELETE FROM event_cases WHERE event_id = ? AND case_id = ?', [id, caseId]);
     res.json({ ok: true, event: await loadEvent(id) });
   })

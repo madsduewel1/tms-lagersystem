@@ -95,7 +95,7 @@ export default function LocationDetailPage() {
               <Icon name="qr" size={16} />
               Label
             </button>
-            <Link className="btn btn-primary" to={`/lagerorte/new?id=${location.id}`}>
+            <Link className="btn btn-primary" to={`/lagerorte/edit?id=${location.id}`}>
               <Icon name="edit" size={16} />
               Bearbeiten
             </Link>

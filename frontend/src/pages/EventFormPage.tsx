@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { PageHeader, Field, Alert, Loading } from '../components/ui';
+import { MultiSelect } from '../components/MultiSelect';
 import type { EventEditor, EventRow, EventStatus, UserOption } from '../types';
 import { eventStatusLabels } from '../utils/format';
 
@@ -73,7 +74,7 @@ export default function EventFormPage() {
           setForm(toForm(data.event));
           setEditorIds(data.editors.map((e) => e.id));
           setCanManageEditors(
-            user?.role === 'administrator' || Number(data.event.created_by) === user?.id
+            user?.isAdmin || Number(data.event.created_by) === user?.id
           );
         })
         .catch((err) => setError(err instanceof ApiError ? err.message : 'Laden fehlgeschlagen'))
@@ -84,12 +85,6 @@ export default function EventFormPage() {
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
-
-  function toggleEditor(id: number) {
-    setEditorIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  }
 
   function set<K extends keyof EventFormData>(key: K, value: EventFormData[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -230,20 +225,17 @@ export default function EventFormPage() {
         </Field>
         {canManageEditors && (
           <Field label="Bearbeitung erlauben für" hint="Nur die Ersteller und Admins können dieses Event außerdem bearbeiten. Freigeschaltete Nutzer können das Event mitplanen, aber nicht die Rechte ändern.">
-            <div className="check-grid">
-              {users.length === 0 && <span className="form-hint">Keine aktiven Benutzer gefunden.</span>}
-              {users.map((u) => (
-                <label key={u.id} className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={editorIds.includes(u.id)}
-                    onChange={() => toggleEditor(u.id)}
-                  />
-                  <span>{u.name || u.username}</span>
-                  <span className="check-row-sub">{u.username}</span>
-                </label>
-              ))}
-            </div>
+            <MultiSelect
+              options={users.map((u) => ({
+                value: u.id,
+                label: u.name || u.username,
+                sublabel: u.username,
+              }))}
+              value={editorIds}
+              onChange={setEditorIds}
+              placeholder="Benutzer auswählen"
+              emptyText="Keine aktiven Benutzer gefunden."
+            />
           </Field>
         )}
       </div>

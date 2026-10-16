@@ -1,29 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { usePublicSettings } from '../hooks/usePublicSettings';
-import { fileUrl } from '../api/client';
-import { Icon, type IconName } from './Icon';
+import { Icon } from './Icon';
 import { AccountModal } from './AccountModal';
-
-const tmsLogo = import.meta.env.BASE_URL + 'tms-logo.png';
-
-interface NavDef {
-  to: string;
-  label: string;
-  icon: IconName;
-  adminOnly?: boolean;
-}
-
-const nav: NavDef[] = [
-  { to: '/inventar', label: 'Inventar', icon: 'boxes' },
-  { to: '/lagerorte', label: 'Lagerorte', icon: 'grid' },
-  { to: '/cases', label: 'Cases', icon: 'case' },
-  { to: '/labels', label: 'Labels', icon: 'qr' },
-  { to: '/events', label: 'Events', icon: 'calendar' },
-  { to: '/users', label: 'Benutzer', icon: 'user', adminOnly: true },
-  { to: '/settings', label: 'Einstellungen', icon: 'settings', adminOnly: true },
-];
+import { GlobalSearch } from './GlobalSearch';
+import { NotificationBell } from './NotificationBell';
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -35,92 +17,33 @@ function initialsOf(name: string): string {
 function AppLayout() {
   const { user, logout } = useAuth();
   const settings = usePublicSettings();
-  const [navOpen, setNavOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountTab, setAccountTab] = useState<'account' | 'password' | null>(null);
-  const navRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
       const t = e.target as Node;
-      if (navRef.current && !navRef.current.contains(t)) setNavOpen(false);
       if (menuRef.current && !menuRef.current.contains(t)) setMenuOpen(false);
     }
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const isAdmin = user?.role === 'administrator';
-  const areas = nav.filter((n) => !n.adminOnly);
-  const adminNav = nav.filter((n) => n.adminOnly && isAdmin);
-  const logoUrl = settings.logo_url ? fileUrl(settings.logo_url) : tmsLogo;
   const forcePassword = Boolean(user?.must_change_password);
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <Link to="/" className="topbar-brand" title="Startseite">
-          <img className="tms-logo" src={logoUrl} alt="TMS Event-Technik Logo" />
+          <Icon name="boxes" size={24} />
           <em>{settings.system_name}</em>
         </Link>
 
-        <div className="topbar-mod-wrap" ref={navRef}>
-          <button
-            className={`topbar-mod-btn${navOpen ? ' active' : ''}`}
-            onClick={() => setNavOpen((o) => !o)}
-            aria-haspopup="menu"
-            aria-expanded={navOpen}
-          >
-            <Icon name="menu" size={18} />
-            <span>Module</span>
-            <Icon name="chevron-down" size={14} />
-          </button>
-          {navOpen && (
-            <div className="module-menu card" role="menu">
-              <p className="module-menu-label">Bereiche</p>
-              {areas.map((n) => (
-                <NavLink
-                  key={n.to}
-                  to={n.to}
-                  role="menuitem"
-                  className={({ isActive }) =>
-                    `module-menu-item${isActive ? ' active' : ''}`
-                  }
-                  onClick={() => setNavOpen(false)}
-                >
-                  <span className="module-menu-ico">
-                    <Icon name={n.icon} size={18} />
-                  </span>
-                  <span>{n.label}</span>
-                </NavLink>
-              ))}
-              {adminNav.length > 0 && (
-                <>
-                  <p className="module-menu-label">Administration</p>
-                  {adminNav.map((n) => (
-                    <NavLink
-                      key={n.to}
-                      to={n.to}
-                      role="menuitem"
-                      className={({ isActive }) =>
-                        `module-menu-item${isActive ? ' active' : ''}`
-                      }
-                      onClick={() => setNavOpen(false)}
-                    >
-                      <span className="module-menu-ico">
-                        <Icon name={n.icon} size={18} />
-                      </span>
-                      <span>{n.label}</span>
-                    </NavLink>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
         <div className="topbar-spacer" />
+
+        <GlobalSearch />
+        <NotificationBell />
         <div className="avatar-wrap" ref={menuRef}>
           <button
             className={`avatar-btn${menuOpen ? ' active' : ''}`}
@@ -130,7 +53,9 @@ function AppLayout() {
             aria-label={`Konto ${user?.name ?? user?.username ?? ''}`}
           >
             <span className="avatar-btn-name">{user?.name ?? user?.username}</span>
-            <Icon name="chevron-down" size={16} />
+            <span className="avatar avatar-top">
+              {initialsOf(user?.name ?? user?.username ?? '')}
+            </span>
           </button>
           {menuOpen && (
             <div className="avatar-menu card">
@@ -140,10 +65,14 @@ function AppLayout() {
                   <strong>{user?.name}</strong>
                   <span>{user?.username}</span>
                   <span className="role-label">
-                    {isAdmin ? 'Administrator' : 'Techniker'}
+                    {user?.roles.map((r) => r.label).join(', ')}
                   </span>
                 </div>
               </div>
+              <Link className="avatar-menu-item" to="/" onClick={() => setMenuOpen(false)}>
+                <Icon name="grid" size={16} />
+                <span>Übersicht</span>
+              </Link>
               <button
                 className="avatar-menu-item"
                 onClick={() => {

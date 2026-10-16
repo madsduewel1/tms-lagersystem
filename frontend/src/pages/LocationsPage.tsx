@@ -161,7 +161,7 @@ export default function LocationsPage() {
                         onClick={() => downloadFileQuiet(`/api/labels/pdf?type=location&ids=${l.id}`, `label-${l.code ?? l.id}.pdf`, setError)}>
                         <Icon name="qr" size={16} />
                       </button>
-                      <button className="icon-btn" title="Bearbeiten" onClick={() => navigate(`/lagerorte/new?id=${l.id}`)}>
+                      <button className="icon-btn" title="Bearbeiten" onClick={() => navigate(`/lagerorte/edit?id=${l.id}`)}>
                         <Icon name="edit" size={16} />
                       </button>
                       <button className="icon-btn danger" title="Löschen" onClick={() => void removeLoc(l)}>

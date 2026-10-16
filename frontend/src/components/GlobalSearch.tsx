@@ -136,7 +136,7 @@ export function GlobalSearch() {
                 <button
                   key={`s-${s.id}`}
                   className="search-item"
-                  onClick={() => go(`/lieferanten?focus=${s.id}`)}
+                  onClick={() => go(`/suche?q=${encodeURIComponent(query.trim())}`)}
                 >
                   <Icon name="truck" size={16} />
                   <span className="search-item-main">

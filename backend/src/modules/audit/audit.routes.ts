@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { parseIntParam } from '../../utils/helpers.js';
 import { listAudit } from './audit.service.js';
 
@@ -13,7 +13,7 @@ function safeParse(value: string): unknown {
 
 export const auditRouter = Router();
 
-auditRouter.use(requireAuth, requireRole('administrator'));
+auditRouter.use(requireAuth, requirePermission('audit.view'));
 
 auditRouter.get('/', async (req, res, next) => {
   try {

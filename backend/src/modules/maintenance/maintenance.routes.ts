@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool, type SqlRow } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireModule } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, parseId } from '../../utils/helpers.js';
@@ -42,6 +42,7 @@ const logSchema = z.object({
 export const maintenanceRouter = Router();
 maintenanceRouter.use(requireAuth);
 
+maintenanceRouter.use(requireModule('maintenance.view', 'maintenance.manage'));
 maintenanceRouter.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -221,6 +222,13 @@ maintenanceRouter.post(
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const { status, note } = req.body as { status?: string | null; note?: string | null };
+    const [exists] = await pool.query<SqlRow<{ ok: number }>[]>(
+      'SELECT 1 AS ok FROM maintenance WHERE id = ?',
+      [id]
+    );
+    if (exists.length === 0) {
+      throw new HttpError(404, 'Wartungseintrag nicht gefunden');
+    }
     await pool.query(
       `INSERT INTO maintenance_logs (maintenance_id, user_id, status, note) VALUES (?, ?, ?, ?)`,
       [id, req.user!.id, status ?? null, note ?? null]

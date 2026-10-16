@@ -1,12 +1,40 @@
-export type RoleName = 'administrator' | 'techniker';
+export type RoleName = string;
+
+export interface RoleRef {
+  id: number;
+  name: string;
+  label: string;
+}
 
 export interface User {
   id: number;
   username: string;
   name: string;
-  role: RoleName;
+  roles: RoleRef[];
+  isAdmin: boolean;
   email?: string | null;
   must_change_password: boolean;
+  permissions: string[];
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  label: string;
+  description: string | null;
+  is_system: number;
+  sort: number;
+  user_count: number;
+  permissions: string[];
+  assignable_role_ids: number[];
+}
+
+export interface Permission {
+  id: number;
+  code: string;
+  label: string;
+  category: string;
+  sort: number;
 }
 
 export interface UserRow extends User {
@@ -504,4 +532,100 @@ export interface PublicSettings {
   system_name: string;
   logo_url: string;
   support_email: string;
+}
+
+// --- Team-Module: Aufgaben, Pinnwand, Nachrichten, Termine ---
+
+export type TaskStatus = 'offen' | 'in_arbeit' | 'erledigt' | 'abgebrochen';
+export type TaskPriority = 'niedrig' | 'normal' | 'hoch';
+
+export interface Task {
+  id: number;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee_id: number | null;
+  assignee_name: string | null;
+  created_by: number | null;
+  created_by_name: string | null;
+  due_at: string | null;
+  completed_at: string | null;
+  completed_by: number | null;
+  completed_by_name: string | null;
+  item_id: number | null;
+  item_name: string | null;
+  event_id: number | null;
+  event_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BoardPost {
+  id: number;
+  author_id: number | null;
+  author_name: string | null;
+  title: string | null;
+  body: string;
+  pinned: number | boolean;
+  comment_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PostComment {
+  id: number;
+  post_id: number;
+  author_id: number | null;
+  author_name: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface AppNotification {
+  id: number;
+  type: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface ChatPartner {
+  id: number;
+  name: string;
+  username: string;
+  role?: RoleName;
+  unread?: number;
+}
+
+export interface Conversation {
+  id: number;
+  name: string;
+  username: string;
+  last_body: string;
+  last_at: string;
+  unread: number;
+}
+
+export interface ChatMessage {
+  id: number;
+  sender_id: number;
+  recipient_id: number;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface Appointment {
+  id: number;
+  title: string;
+  description: string | null;
+  location: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  all_day: number | boolean;
+  created_by: number | null;
+  created_by_name: string | null;
 }

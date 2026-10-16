@@ -273,7 +273,7 @@ export default function AssetDetailPage() {
             </button>
             <Link
               className="btn btn-primary"
-              to={`/inventar/new?id=${item.id}`}
+              to={`/inventar/edit?id=${item.id}`}
             >
               <Icon name="edit" size={16} />
               Bearbeiten

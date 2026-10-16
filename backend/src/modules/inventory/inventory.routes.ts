@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool, type SqlRow } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireModule } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, parseId } from '../../utils/helpers.js';
@@ -21,6 +21,7 @@ const countSchema = z.object({
 export const inventoryRouter = Router();
 inventoryRouter.use(requireAuth);
 
+inventoryRouter.use(requireModule('inventory.view', 'inventory.manage'));
 async function descendantIds(rootId: number): Promise<number[]> {
   const [rows] = await pool.query<SqlRow<{ id: number; parent_id: number | null }>[]>(
     'SELECT id, parent_id FROM storage_locations'

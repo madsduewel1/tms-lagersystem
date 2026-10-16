@@ -3,23 +3,27 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { pool } from '../../db/pool.js';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { validate, HttpError } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
-import type { RoleName } from '../../types/index.js';
+import type { AuthedUser, RoleRef } from '../../types/index.js';
+
+const roleIdsSchema = z
+  .array(z.coerce.number().int().positive())
+  .min(1, 'Mindestens eine Rolle erforderlich');
 
 const createSchema = z.object({
   username: z.string().min(3).max(64).regex(/^[a-zA-Z0-9._-]+$/, 'Ungültiger Benutzername'),
   name: z.string().min(1).max(128),
   email: z.string().email('Ungültige E-Mail-Adresse').max(160).nullable().optional(),
   password: z.string().min(1).max(256).optional(),
-  role: z.enum(['administrator', 'techniker']),
+  roleIds: roleIdsSchema,
 });
 
 const updateSchema = z.object({
   name: z.string().min(1).max(128).optional(),
   email: z.string().email('Ungültige E-Mail-Adresse').max(160).nullable().optional(),
-  role: z.enum(['administrator', 'techniker']).optional(),
+  roleIds: roleIdsSchema.optional(),
   active: z.boolean().optional(),
   must_change_password: z.boolean().optional(),
 });
@@ -37,14 +41,12 @@ interface UserRow {
   username: string;
   email: string | null;
   name: string;
-  role: RoleName;
+  roles: RoleRef[];
   active: number;
   must_change_password: number;
   last_login_at: Date | null;
   created_at: Date;
 }
-
-const availableRoles = ['administrator', 'techniker'] as const;
 
 type UserReferenceEffect = 'entfernt' | 'ohne_zuordnung';
 
@@ -67,6 +69,80 @@ export function genTempPassword(): string {
     out += alphabet[bytes[i] % alphabet.length];
   }
   return out;
+}
+
+/** Wirft 400, wenn eine der angegebenen Rollen nicht existiert. */
+async function assertRolesExist(ids: number[]): Promise<void> {
+  if (ids.length === 0) throw new HttpError(400, 'Mindestens eine Rolle erforderlich');
+  const [rows] = await pool.query('SELECT id FROM roles WHERE id IN (?)', [ids]);
+  const found = new Set((rows as Array<{ id: number }>).map((r) => r.id));
+  if (ids.some((id) => !found.has(id))) {
+    throw new HttpError(400, 'Unbekannte Rolle');
+  }
+}
+
+/** Rollen mehrerer Benutzer in einer Abfrage laden. */
+async function rolesForUsers(userIds: number[]): Promise<Map<number, RoleRef[]>> {
+  const map = new Map<number, RoleRef[]>();
+  if (userIds.length === 0) return map;
+  const [rows] = await pool.query(
+    `SELECT ur.user_id, r.id, r.name, r.label
+     FROM user_roles ur
+     JOIN roles r ON r.id = ur.role_id
+     WHERE ur.user_id IN (?)
+     ORDER BY r.sort, r.name`,
+    [userIds]
+  );
+  for (const row of rows as Array<{ user_id: number; id: number; name: string; label: string }>) {
+    const list = map.get(row.user_id) ?? [];
+    list.push({ id: row.id, name: row.name, label: row.label });
+    map.set(row.user_id, list);
+  }
+  return map;
+}
+
+/** Ersetzt die Rollenzuordnung eines Benutzers vollständig. */
+async function replaceUserRoles(userId: number, roleIds: number[]): Promise<void> {
+  await pool.query('DELETE FROM user_roles WHERE user_id = ?', [userId]);
+  if (roleIds.length === 0) return;
+  await pool.query('INSERT INTO user_roles (user_id, role_id) VALUES ?', [
+    roleIds.map((roleId) => [userId, roleId]),
+  ]);
+}
+
+/**
+ * Rollen-IDs, die der handelnde Benutzer vergeben darf.
+ *
+ * Administratoren dürfen alle Rollen vergeben. Alle anderen dürfen nur die
+ * Rollen zuweisen, die bei ihren eigenen Rollen als "vergebbar" hinterlegt
+ * sind – die Administratorrolle ist dabei grundsätzlich ausgenommen, damit
+ * sich niemand selbst zum Administrator machen kann.
+ */
+async function assignableRoleIdsFor(user: AuthedUser): Promise<Set<number>> {
+  if (user.isAdmin) {
+    const [all] = await pool.query('SELECT id FROM roles');
+    return new Set((all as Array<{ id: number }>).map((r) => r.id));
+  }
+  const [rows] = await pool.query(
+    `SELECT DISTINCT rar.assignable_role_id AS id
+     FROM user_roles ur
+     JOIN role_assignable_roles rar ON rar.role_id = ur.role_id
+     JOIN roles r ON r.id = rar.assignable_role_id
+     WHERE ur.user_id = ? AND r.name <> 'administrator'`,
+    [user.id]
+  );
+  return new Set((rows as Array<{ id: number }>).map((r) => r.id));
+}
+
+/** Liste der Rollen, die der handelnde Benutzer vergeben darf. */
+async function assignableRolesFor(user: AuthedUser): Promise<RoleRef[]> {
+  const [rows] = await pool.query(
+    `SELECT id, name, label FROM roles ORDER BY sort ASC, label ASC`
+  );
+  const roles = rows as RoleRef[];
+  if (user.isAdmin) return roles;
+  const allowed = await assignableRoleIdsFor(user);
+  return roles.filter((r) => allowed.has(r.id));
 }
 
 
@@ -94,18 +170,32 @@ usersOptionsRouter.get('/options', async (_req, res, next) => {
 // ---------------------------------------------------------------------------
 export const usersRouter = Router();
 
-usersRouter.use(requireAuth, requireRole('administrator'));
+usersRouter.use(requireAuth, requirePermission('users.manage'));
 
 usersRouter.get('/', async (_req, res, next) => {
   try {
     const [rows] = await pool.query(
       `SELECT u.id, u.username, u.email, u.name, u.active, u.must_change_password,
-              u.last_login_at, u.created_at, r.name AS role
+              u.last_login_at, u.created_at
        FROM users u
-       JOIN roles r ON r.id = u.role_id
        ORDER BY u.name ASC`
     );
-    res.json({ users: rows as UserRow[] });
+    const base = rows as Array<Omit<UserRow, 'roles'>>;
+    const rolesMap = await rolesForUsers(base.map((u) => u.id));
+    res.json({
+      users: base.map((u) => {
+        const roles = rolesMap.get(u.id) ?? [];
+        return { ...u, roles, isAdmin: roles.some((r) => r.name === 'administrator') };
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+usersRouter.get('/assignable-roles', async (req, res, next) => {
+  try {
+    res.json({ roles: await assignableRolesFor(req.user!) });
   } catch (err) {
     next(err);
   }
@@ -113,12 +203,12 @@ usersRouter.get('/', async (_req, res, next) => {
 
 usersRouter.post('/', validate(createSchema), async (req, res, next) => {
   try {
-    const { username, name, email, password, role } = req.body as {
+    const { username, name, email, password, roleIds } = req.body as {
       username: string;
       name: string;
       email?: string | null;
       password?: string;
-      role: (typeof availableRoles)[number];
+      roleIds: number[];
     };
     const [existing] = await pool.query(
       'SELECT id FROM users WHERE username = ? OR (email IS NOT NULL AND email = ?)',
@@ -127,14 +217,20 @@ usersRouter.post('/', validate(createSchema), async (req, res, next) => {
     if ((existing as Array<{ id: number }>).length > 0) {
       throw new HttpError(409, 'Benutzername oder E-Mail ist bereits vergeben');
     }
+    await assertRolesExist(roleIds);
+    const allowed = await assignableRoleIdsFor(req.user!);
+    if (roleIds.some((roleId) => !allowed.has(roleId))) {
+      throw new HttpError(400, 'Du darfst nicht alle dieser Rollen vergeben');
+    }
     const tempPassword = genTempPassword();
     const hash = await bcrypt.hash(password ?? tempPassword, 12);
     const [result] = await pool.query(
-      `INSERT INTO users (username, name, email, password_hash, role_id, must_change_password)
-       VALUES (?, ?, ?, ?, (SELECT id FROM roles WHERE name = ?), 1)`,
-      [username, name, email ?? null, hash, role]
+      `INSERT INTO users (username, name, email, password_hash, must_change_password)
+       VALUES (?, ?, ?, ?, 1)`,
+      [username, name, email ?? null, hash]
     );
     const userId = Number((result as { insertId: number }).insertId);
+    await replaceUserRoles(userId, roleIds);
     await writeAudit({
       userId: req.user!.id,
       action: 'user_created',
@@ -143,7 +239,7 @@ usersRouter.post('/', validate(createSchema), async (req, res, next) => {
       // Klartext-Passwörter gehören nicht ins Audit-Log: der Eintrag ist für
       // jeden Administrator dauerhaft lesbar. Der Wert geht nur an den
       // anlegenden Admin zurück.
-      details: { username, role, temporaryPasswordIssued: !password },
+      details: { username, roleIds, temporaryPasswordIssued: !password },
       ip: req.ip,
     });
 
@@ -192,7 +288,7 @@ usersRouter.patch('/:id', validate(updateSchema), async (req, res, next) => {
     const body = req.body as {
       name?: string;
       email?: string | null;
-      role?: (typeof availableRoles)[number];
+      roleIds?: number[];
       active?: boolean;
       must_change_password?: boolean;
     };
@@ -200,11 +296,21 @@ usersRouter.patch('/:id', validate(updateSchema), async (req, res, next) => {
     if (id === req.user!.id && body.active === false) {
       throw new HttpError(400, 'Du kannst dich nicht selbst deaktivieren');
     }
-    if (id === req.user!.id && body.role !== undefined && body.role !== target.role) {
-      // Ohne diese Sperre könnte sich ein Benutzer mit gültigem Token (z. B.
-      // über ein noch nicht zurückgesetztes temporäres Passwort) selbst zum
-      // Administrator machen und danach /api/users und /api/audit lesen.
-      throw new HttpError(400, 'Du kannst deine eigene Rolle nicht ändern');
+    // Rollenänderungen sind erlaubt – auch am eigenen Konto –, aber nur im
+    // Rahmen der vergebbaren Rollen. Die Administratorrolle ist für
+    // Nicht-Administratoren ausgenommen, ein Hochstufen ist damit unmöglich.
+    if (body.roleIds !== undefined) {
+      await assertRolesExist(body.roleIds);
+      const allowed = await assignableRoleIdsFor(req.user!);
+      const current = new Set(target.roles.map((r) => r.id));
+      const next = new Set(body.roleIds);
+      const changed = [
+        ...body.roleIds.filter((roleId) => !current.has(roleId)),
+        ...[...current].filter((roleId) => !next.has(roleId)),
+      ];
+      if (changed.some((roleId) => !allowed.has(roleId))) {
+        throw new HttpError(400, 'Du darfst nicht alle dieser Rollen vergeben');
+      }
     }
 
     const fields: string[] = [];
@@ -225,13 +331,12 @@ usersRouter.patch('/:id', validate(updateSchema), async (req, res, next) => {
       fields.push('must_change_password = ?');
       values.push(body.must_change_password ? 1 : 0);
     }
-    if (body.role !== undefined && body.role !== target.role) {
-      fields.push('role_id = (SELECT id FROM roles WHERE name = ?)');
-      values.push(body.role);
-    }
     if (fields.length > 0) {
       values.push(id);
       await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+    }
+    if (body.roleIds !== undefined) {
+      await replaceUserRoles(id, body.roleIds);
     }
     await writeAudit({
       userId: req.user!.id,
@@ -278,14 +383,16 @@ usersRouter.post('/:id/reset-password', validate(resetPasswordSchema), async (re
 
 async function reqUserRow(id: number): Promise<UserRow | null> {
   const [rows] = await pool.query(
-    `SELECT u.id, u.username, u.name, u.active, u.must_change_password, u.last_login_at, u.created_at,
-            r.name AS role
+    `SELECT u.id, u.username, u.email, u.name, u.active, u.must_change_password,
+            u.last_login_at, u.created_at
      FROM users u
-     JOIN roles r ON r.id = u.role_id
      WHERE u.id = ?`,
     [id]
   );
-  return ((rows as UserRow[])[0] ?? null) as UserRow | null;
+  const base = (rows as Array<Omit<UserRow, 'roles'>>)[0];
+  if (!base) return null;
+  const rolesMap = await rolesForUsers([id]);
+  return { ...base, roles: rolesMap.get(id) ?? [] };
 }
 
 /**
@@ -333,9 +440,10 @@ async function userReferences(id: number): Promise<UserReference[]> {
  */
 async function remainingActiveAdmins(excludeId: number): Promise<number> {
   const [rows] = await pool.query(
-    `SELECT COUNT(*) AS total
+    `SELECT COUNT(DISTINCT u.id) AS total
      FROM users u
-     JOIN roles r ON r.id = u.role_id
+     JOIN user_roles ur ON ur.user_id = u.id
+     JOIN roles r ON r.id = ur.role_id
      WHERE r.name = 'administrator' AND u.active = 1 AND u.id <> ?`,
     [excludeId]
   );
@@ -347,7 +455,7 @@ async function deleteBlocker(target: UserRow, ownId: number): Promise<string> {
   if (target.id === ownId) {
     return 'Du kannst dein eigenes Konto nicht löschen.';
   }
-  if (target.role === 'administrator' && (await remainingActiveAdmins(target.id)) === 0) {
+  if (target.roles.some((r) => r.name === 'administrator') && (await remainingActiveAdmins(target.id)) === 0) {
     return 'Dieser Benutzer ist der letzte aktive Administrator. Ohne ihn wäre niemand mehr in der Lage, die Benutzerverwaltung zu öffnen.';
   }
   return '';
@@ -365,7 +473,7 @@ usersRouter.get('/:id/deletion-impact', async (req, res, next) => {
         id: target.id,
         username: target.username,
         name: target.name,
-        role: target.role,
+        roles: target.roles,
         active: target.active,
       },
       blocked: await deleteBlocker(target, req.user!.id),
@@ -417,7 +525,7 @@ usersRouter.delete('/:id', async (req, res, next) => {
       details: {
         username: target.username,
         name: target.name,
-        role: target.role,
+        roles: target.roles.map((r) => r.name),
         references: Object.fromEntries(references.map((r) => [r.key, r.count])),
       },
       ip: req.ip,

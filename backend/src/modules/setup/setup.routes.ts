@@ -48,7 +48,7 @@ setupRouter.post('/init', validate(initSchema), async (req, res, next) => {
     // `roles` muss mitgesperrt werden: darunter liegt eine Subquery, und bei
     // aktivem LOCK TABLES ist jeder Zugriff auf eine nicht gesperrte Tabelle
     // ein Fehler ("Table 'roles' was not locked with LOCK TABLES", errno 1100).
-    await connection.query('LOCK TABLES users WRITE, roles READ');
+    await connection.query('LOCK TABLES users WRITE, roles READ, user_roles WRITE');
     try {
       const [countRows] = await connection.query<SqlRow<{ count: number }>[]>(
         'SELECT COUNT(*) AS count FROM users'
@@ -57,11 +57,16 @@ setupRouter.post('/init', validate(initSchema), async (req, res, next) => {
         throw new HttpError(403, 'Ersteinrichtung bereits abgeschlossen');
       }
       const [result] = await connection.query(
-        `INSERT INTO users (username, name, email, password_hash, role_id)
-         VALUES (?, ?, ?, ?, (SELECT id FROM roles WHERE name = 'administrator'))`,
+        `INSERT INTO users (username, name, email, password_hash)
+         VALUES (?, ?, ?, ?)`,
         [username, name, email ?? null, hash]
       );
       const userId = Number((result as { insertId: number }).insertId);
+      await connection.query(
+        `INSERT INTO user_roles (user_id, role_id)
+         SELECT ?, id FROM roles WHERE name = 'administrator'`,
+        [userId]
+      );
       await connection.query('UNLOCK TABLES');
       await connection.commit();
 

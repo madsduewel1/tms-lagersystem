@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api, ApiError } from '../api/client';
 import { Icon } from '../components/Icon';
-import { PageHeader, Alert, Field, Modal } from '../components/ui';
-import type { RoleName, UserRow } from '../types';
+import { PageHeader, Alert, Modal } from '../components/ui';
+import { MultiSelect } from '../components/MultiSelect';
+import { RolesPermissions } from '../components/RolesPermissions';
+import type { Role, RoleRef, UserRow } from '../types';
 
 interface ResetResult {
   id: number;
@@ -19,7 +22,7 @@ interface UserReference {
 }
 
 interface DeletionImpact {
-  user: { id: number; username: string; name: string; role: RoleName; active: boolean };
+  user: { id: number; username: string; name: string; roles: RoleRef[]; active: boolean };
   blocked: string;
   references: UserReference[];
 }
@@ -40,20 +43,34 @@ const referenceLabels: Record<string, string> = {
 };
 
 function UsersPage() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, can } = useAuth();
+  const navigate = useNavigate();
+  const canUsers = can('users.manage');
+  const canRoles = can('roles.manage');
+
+  const [params, setParams] = useSearchParams();
+  const tabParam = params.get('tab');
+  const validTabs = [
+    ...(canUsers ? (['benutzer'] as const) : []),
+    ...(canRoles ? (['rollen'] as const) : []),
+  ];
+  const tab: 'benutzer' | 'rollen' =
+    tabParam && (validTabs as readonly string[]).includes(tabParam)
+      ? (tabParam as 'benutzer' | 'rollen')
+      : (validTabs[0] ?? 'benutzer');
+  const setTab = (next: 'benutzer' | 'rollen') => {
+    const p = new URLSearchParams(params);
+    p.set('tab', next);
+    setParams(p, { replace: true });
+  };
+
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [assignableIds, setAssignableIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-
-  // Benutzer erstellen
-  const [createOpen, setCreateOpen] = useState(false);
-  const [newUsername, setNewUsername] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<RoleName>('techniker');
-  const [createdTemp, setCreatedTemp] = useState<{ username: string; name: string; tempPassword: string } | null>(null);
 
   // E-Mail bearbeiten
   const [emailEdit, setEmailEdit] = useState<number | null>(null);
@@ -68,14 +85,21 @@ function UsersPage() {
   const [impactBusy, setImpactBusy] = useState(false);
 
   const load = useCallback(async () => {
+    if (!canUsers) return;
     try {
-      const data = await api<{ users: UserRow[] }>('/api/users');
-      setUsers(data.users);
+      const [userData, roleData, assignableData] = await Promise.all([
+        api<{ users: UserRow[] }>('/api/users'),
+        api<{ roles: Role[] }>('/api/roles'),
+        api<{ roles: RoleRef[] }>('/api/users/assignable-roles'),
+      ]);
+      setUsers(userData.users);
+      setRoles(roleData.roles);
+      setAssignableIds(new Set(assignableData.roles.map((r) => r.id)));
       setSelected(new Set());
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Laden fehlgeschlagen');
     }
-  }, []);
+  }, [canUsers]);
 
   useEffect(() => {
     void load();
@@ -86,28 +110,18 @@ function UsersPage() {
     window.setTimeout(() => setSuccess(''), 6000);
   }
 
-  function toggleSelected(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleAll() {
-    setSelected((prev) => {
-      const allSelected = users.length > 0 && users.every((u) => prev.has(u.id));
-      return allSelected ? new Set() : new Set(users.map((u) => u.id));
-    });
+  function clearSelection() {
+    setSelected(new Set());
   }
 
   // Inaktive Administratoren zählen nicht mit: sie können sich nicht anmelden
   // und damit auch keine Rechte vergeben. Spiegelbild der Prüfung im Backend.
-  const activeAdmins = users.filter((u) => u.role === 'administrator' && u.active).length;
+  const activeAdmins = users.filter(
+    (u) => u.roles.some((r) => r.name === 'administrator') && u.active
+  ).length;
 
   function isLastAdmin(u: UserRow) {
-    return u.role === 'administrator' && u.active && activeAdmins <= 1;
+    return u.roles.some((r) => r.name === 'administrator') && u.active && activeAdmins <= 1;
   }
 
   async function openDelete(u: UserRow) {
@@ -148,37 +162,6 @@ function UsersPage() {
     }
   }
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    setBusy(true);
-    try {
-      const data = await api<{ id: number; tempPassword: string }>('/api/users', {
-        method: 'POST',
-        body: JSON.stringify({
-          username: newUsername.trim(),
-          name: newName.trim(),
-          email: newEmail.trim() || null,
-          role: newRole,
-        }),
-      });
-      setCreatedTemp({
-        username: newUsername.trim(),
-        name: newName.trim(),
-        tempPassword: data.tempPassword,
-      });
-      setNewUsername('');
-      setNewName('');
-      setNewEmail('');
-      setNewRole('techniker');
-      await load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Erstellen fehlgeschlagen');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function toggleActive(u: UserRow) {
     setError('');
     try {
@@ -193,15 +176,17 @@ function UsersPage() {
     }
   }
 
-  async function changeRole(u: UserRow) {
-    const role = u.role === 'administrator' ? 'techniker' : 'administrator';
+  async function changeRoles(u: UserRow, roleIds: number[]) {
+    const current = [...u.roles.map((r) => r.id)].sort((a, b) => a - b).join(',');
+    const next = [...roleIds].sort((a, b) => a - b).join(',');
+    if (current === next || roleIds.length === 0) return;
     setError('');
     try {
       await api(`/api/users/${u.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ role }),
+        body: JSON.stringify({ roleIds }),
       });
-      flash('Rolle geändert');
+      flash('Rollen geändert');
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Aktion fehlgeschlagen');
@@ -289,22 +274,60 @@ function UsersPage() {
   return (
     <>
       <PageHeader
-        title="Benutzer"
-        subtitle="Benutzer anlegen, Passwörter zurücksetzen und Rechte verwalten"
+        title="Benutzer & Rollen"
+        subtitle={
+          tab === 'rollen'
+            ? 'Rollen anlegen und Rechte zuweisen'
+            : 'Benutzer anlegen, Passwörter zurücksetzen und Rollen zuweisen'
+        }
         actions={
-          <button className="btn btn-primary" onClick={() => { setError(''); setCreateOpen(true); }}>
-            <Icon name="plus" size={16} />
-            Benutzer erstellen
-          </button>
+          tab === 'benutzer' && canUsers ? (
+            <button className="btn btn-primary" onClick={() => navigate('/users/new')}>
+              <Icon name="plus" size={16} />
+              Benutzer erstellen
+            </button>
+          ) : undefined
         }
       />
 
+      {validTabs.length > 1 && (
+        <div className="tabs">
+          {canUsers && (
+            <button
+              className={`tab${tab === 'benutzer' ? ' active' : ''}`}
+              onClick={() => setTab('benutzer')}
+            >
+              Benutzer
+            </button>
+          )}
+          {canRoles && (
+            <button
+              className={`tab${tab === 'rollen' ? ' active' : ''}`}
+              onClick={() => setTab('rollen')}
+            >
+              Rollen & Rechte
+            </button>
+          )}
+        </div>
+      )}
+
+      {tab === 'rollen' && canRoles && <RolesPermissions />}
+
+      {tab === 'benutzer' && canUsers && (
+        <>
       {error && <Alert tone="error">{error}</Alert>}
       {success && <Alert tone="success">{success}</Alert>}
 
       <div className="card toolbar" style={{ marginBottom: 16 }}>
+        <MultiSelect
+          options={users.map((u) => ({ value: u.id, label: u.name, sublabel: u.username }))}
+          value={Array.from(selected)}
+          onChange={(next) => setSelected(new Set(next))}
+          disabledValues={currentUser?.id != null ? [currentUser.id] : []}
+          placeholder="Benutzer auswählen"
+        />
         <span style={{ color: 'var(--text-secondary)' }}>
-          {selected.size > 0 ? `${selected.size} ausgewählt` : 'Benutzer per Kästchen auswählen'}
+          {selected.size > 0 ? `${selected.size} ausgewählt` : 'Für Massen-Aktionen auswählen'}
         </span>
         <button
           className="btn"
@@ -316,7 +339,7 @@ function UsersPage() {
           Passwort zurücksetzen (Code)
         </button>
         {selected.size > 0 && (
-          <button className="btn" onClick={toggleAll} disabled={busy}>
+          <button className="btn" onClick={clearSelection} disabled={busy}>
             Auswahl aufheben
           </button>
         )}
@@ -330,14 +353,6 @@ function UsersPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>
-                    <input
-                      type="checkbox"
-                      checked={users.length > 0 && users.every((u) => selected.has(u.id))}
-                      onChange={toggleAll}
-                      title="Alle auswählen"
-                    />
-                  </th>
                   <th>Name</th>
                   <th>E-Mail</th>
                   <th>Rolle</th>
@@ -350,13 +365,6 @@ function UsersPage() {
               <tbody>
                 {users.map((u) => (
                   <tr key={u.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(u.id)}
-                        onChange={() => toggleSelected(u.id)}
-                      />
-                    </td>
                     <td>
                       <strong>{u.name}</strong>
                       <div className="cell-sub">@{u.username}</div>
@@ -392,9 +400,17 @@ function UsersPage() {
                       </button>
                     </td>
                     <td>
-                      <span className={`badge ${u.role === 'administrator' ? 'badge-admin' : 'badge-techniker'}`}>
-                        {u.role === 'administrator' ? 'Administrator' : 'Techniker'}
-                      </span>
+                      <MultiSelect
+                        options={roles.map((r) => ({ value: r.id, label: r.label }))}
+                        value={u.roles.map((r) => r.id)}
+                        disabled={busy}
+                        disabledValues={roles
+                          .filter((r) => !assignableIds.has(r.id))
+                          .map((r) => r.id)}
+                        onChange={(ids) => void changeRoles(u, ids)}
+                        placeholder="Keine Rolle"
+                        emptyText="Keine Rollen vorhanden."
+                      />
                     </td>
                     <td>
                       <span className={`badge ${u.active ? 'badge-active' : 'badge-inactive'}`}>
@@ -422,14 +438,6 @@ function UsersPage() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button
-                          className="btn"
-                          onClick={() => void changeRole(u)}
-                          disabled={u.id === currentUser?.id}
-                          title={u.id === currentUser?.id ? 'Eigene Rolle nicht änderbar' : undefined}
-                        >
-                          {u.role === 'administrator' ? '→ Techniker' : '→ Admin'}
-                        </button>
                         <button
                           className="btn"
                           onClick={() => void resetSingle(u)}
@@ -470,62 +478,6 @@ function UsersPage() {
           </div>
         )}
       </div>
-
-      {createOpen && (
-        <Modal title="Benutzer erstellen" onClose={() => { setCreateOpen(false); setCreatedTemp(null); }}>
-          {createdTemp ? (
-            <>
-              <Alert tone="success">Benutzer {createdTemp.name || createdTemp.username} wurde angelegt.</Alert>
-              <div className="card" style={{ margin: '12px 0', borderColor: 'var(--warning)' }}>
-                <p style={{ margin: 0 }}>
-                  <strong>Vorläufiges Passwort (6-stellig):</strong>
-                </p>
-                <p className="mono" style={{ fontSize: 26, fontWeight: 700, letterSpacing: 4, margin: '8px 0' }}>
-                  {createdTemp.tempPassword}
-                </p>
-                <p className="form-hint" style={{ margin: 0 }}>
-                  Der Benutzer wird beim ersten Login aufgefordert, ein eigenes Passwort zu setzen.
-                </p>
-              </div>
-              <div className="modal-actions">
-                <button className="btn btn-primary" onClick={() => { setCreatedTemp(null); setCreateOpen(false); }}>
-                  Fertig
-                </button>
-              </div>
-            </>
-          ) : (
-            <form onSubmit={handleCreate}>
-              <Field label="Benutzername">
-                <input className="form-input" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} required autoFocus />
-              </Field>
-              <Field label="Name">
-                <input className="form-input" value={newName} onChange={(e) => setNewName(e.target.value)} required />
-              </Field>
-              <Field label="E-Mail (optional)">
-                <input className="form-input" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
-              </Field>
-              <Field label="Rolle">
-                <select className="form-select" value={newRole} onChange={(e) => setNewRole(e.target.value as RoleName)}>
-                  <option value="techniker">Techniker</option>
-                  <option value="administrator">Administrator</option>
-                </select>
-              </Field>
-              <p className="form-hint">
-                Es wird automatisch ein 6-stelliges vorläufiges Passwort vergeben. Der Benutzer muss sich
-                beim ersten Login ein neues Passwort setzen.
-              </p>
-              <div className="modal-actions">
-                <button type="button" className="btn" onClick={() => setCreateOpen(false)}>
-                  Abbrechen
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={busy}>
-                  Benutzer erstellen
-                </button>
-              </div>
-            </form>
-          )}
-        </Modal>
-      )}
 
       {resetResult && (
         <Modal title="Passwort zurücksetzen" onClose={() => setResetResult(null)}>
@@ -636,6 +588,8 @@ function UsersPage() {
             </>
           )}
         </Modal>
+      )}
+        </>
       )}
     </>
   );

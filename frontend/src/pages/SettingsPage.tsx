@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, apiUpload, ApiError, fileUrl } from '../api/client';
-import { PageHeader, Alert, Field, Modal } from '../components/ui';
+import { PageHeader, Alert, Field } from '../components/ui';
 import { AuditLog } from '../components/AuditLog';
 import { Icon } from '../components/Icon';
+import { useAuth } from '../contexts/AuthContext';
 import type { Category, LabelFormat, PublicSettings } from '../types';
 
 const tmsLogo = import.meta.env.BASE_URL + 'tms-logo.png';
@@ -52,7 +54,27 @@ const defaults: SettingsState = {
 };
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('general');
+  const { can } = useAuth();
+  const canSettings = can('settings.manage');
+  const canLabels = can('labels.print');
+  const canCategories = can('categories.manage');
+  const canAudit = can('audit.view');
+
+  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const tabParam = params.get('tab') as Tab | null;
+  const validTabs: Tab[] = [
+    ...(canSettings ? (['general', 'labels', 'logo'] as Tab[]) : []),
+    ...(canCategories ? (['categories'] as Tab[]) : []),
+    ...(canAudit ? (['audit'] as Tab[]) : []),
+  ];
+  const fallbackTab: Tab = validTabs[0] ?? 'general';
+  const tab: Tab = tabParam && validTabs.includes(tabParam) ? tabParam : fallbackTab;
+  const setTab = (next: Tab) => {
+    const p = new URLSearchParams(params);
+    p.set('tab', next);
+    setParams(p, { replace: true });
+  };
   const [settings, setSettings] = useState<SettingsState>(defaults);
   const [formats, setFormats] = useState<LabelFormat[]>([]);
   const [publicInfo, setPublicInfo] = useState<PublicSettings>({
@@ -66,44 +88,53 @@ export default function SettingsPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const [categories, setCategories] = useState<Category[]>([]);
-  const [catBusy, setCatBusy] = useState(false);
-  const [catModal, setCatModal] = useState<{ open: boolean; category: Category | null }>({
-    open: false,
-    category: null,
-  });
-  const [catName, setCatName] = useState('');
-  const [catDesc, setCatDesc] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const [data, fmtData, pubData, catData] = await Promise.all([
-        api<{ settings: Record<string, string | null> }>('/api/settings'),
-        api<{ formats: LabelFormat[] }>('/api/labels/formats'),
-        api<PublicSettings>('/api/settings/public'),
-        api<{ categories: Category[] }>('/api/categories'),
-      ]);
-      setSettings({
-        system_name: data.settings.system_name ?? defaults.system_name,
-        warehouse_name: data.settings.warehouse_name ?? defaults.warehouse_name,
-        inventory_prefix: data.settings.inventory_prefix ?? defaults.inventory_prefix,
-        support_email: data.settings.support_email ?? '',
-        qr_base_url: data.settings.qr_base_url ?? '',
-        label_format: data.settings.label_format ?? defaults.label_format,
-        label_margin_top: data.settings.label_margin_top ?? defaults.label_margin_top,
-        label_margin_right: data.settings.label_margin_right ?? defaults.label_margin_right,
-        label_margin_bottom: data.settings.label_margin_bottom ?? defaults.label_margin_bottom,
-        label_margin_left: data.settings.label_margin_left ?? defaults.label_margin_left,
-        label_gap_x: data.settings.label_gap_x ?? defaults.label_gap_x,
-        label_gap_y: data.settings.label_gap_y ?? defaults.label_gap_y,
-        label_distribute: data.settings.label_distribute ?? defaults.label_distribute,
-      });
-      setFormats(fmtData.formats);
+      const pubData = await api<PublicSettings>('/api/settings/public');
       setPublicInfo(pubData);
-      setCategories(catData.categories);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Laden fehlgeschlagen');
     }
-  }, []);
+    if (canSettings) {
+      try {
+        const data = await api<{ settings: Record<string, string | null> }>('/api/settings');
+        setSettings({
+          system_name: data.settings.system_name ?? defaults.system_name,
+          warehouse_name: data.settings.warehouse_name ?? defaults.warehouse_name,
+          inventory_prefix: data.settings.inventory_prefix ?? defaults.inventory_prefix,
+          support_email: data.settings.support_email ?? '',
+          qr_base_url: data.settings.qr_base_url ?? '',
+          label_format: data.settings.label_format ?? defaults.label_format,
+          label_margin_top: data.settings.label_margin_top ?? defaults.label_margin_top,
+          label_margin_right: data.settings.label_margin_right ?? defaults.label_margin_right,
+          label_margin_bottom: data.settings.label_margin_bottom ?? defaults.label_margin_bottom,
+          label_margin_left: data.settings.label_margin_left ?? defaults.label_margin_left,
+          label_gap_x: data.settings.label_gap_x ?? defaults.label_gap_x,
+          label_gap_y: data.settings.label_gap_y ?? defaults.label_gap_y,
+          label_distribute: data.settings.label_distribute ?? defaults.label_distribute,
+        });
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Laden fehlgeschlagen');
+      }
+    }
+    if (canLabels) {
+      try {
+        const fmtData = await api<{ formats: LabelFormat[] }>('/api/labels/formats');
+        setFormats(fmtData.formats);
+      } catch {
+        /* Formate sind optional */
+      }
+    }
+    if (canCategories) {
+      try {
+        const catData = await api<{ categories: Category[] }>('/api/categories');
+        setCategories(catData.categories);
+      } catch {
+        /* Kategorien sind optional */
+      }
+    }
+  }, [canSettings, canLabels, canCategories]);
 
   useEffect(() => {
     void load();
@@ -151,12 +182,6 @@ export default function SettingsPage() {
     }
   }
 
-  function openCatModal(category: Category | null) {
-    setCatModal({ open: true, category });
-    setCatName(category?.name ?? '');
-    setCatDesc(category?.description ?? '');
-  }
-
   async function saveLabels(e: FormEvent) {
     e.preventDefault();
     setError('');
@@ -173,34 +198,6 @@ export default function SettingsPage() {
       setError(err instanceof ApiError ? err.message : 'Speichern fehlgeschlagen');
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function saveCategory() {
-    setError('');
-    if (!catName.trim()) {
-      setError('Bitte einen Namen angeben');
-      return;
-    }
-    setCatBusy(true);
-    try {
-      const body = { name: catName.trim(), description: catDesc.trim() || null };
-      if (catModal.category) {
-        await api(`/api/categories/${catModal.category.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(body),
-        });
-      } else {
-        await api('/api/categories', { method: 'POST', body: JSON.stringify(body) });
-      }
-      setCatModal({ open: false, category: null });
-      flash('Kategorie gespeichert');
-      const catData = await api<{ categories: Category[] }>('/api/categories');
-      setCategories(catData.categories);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Speichern fehlgeschlagen');
-    } finally {
-      setCatBusy(false);
     }
   }
 
@@ -229,12 +226,10 @@ export default function SettingsPage() {
       <div className="tabs">
         {(
           [
-            ['general', 'Allgemein'],
-            ['labels', 'Etiketten'],
-            ['logo', 'Logo'],
-            ['categories', 'Kategorien'],
-            ['audit', 'Audit-Log'],
-          ] as Array<[Tab, string]>
+            ...(canSettings ? ([['general', 'Allgemein'], ['labels', 'Etiketten'], ['logo', 'Logo']] as Array<[Tab, string]>) : []),
+            ...(canCategories ? ([['categories', 'Kategorien']] as Array<[Tab, string]>) : []),
+            ...(canAudit ? ([['audit', 'Audit-Log']] as Array<[Tab, string]>) : []),
+          ]
         ).map(([key, label]) => (
           <button
             key={key}
@@ -247,7 +242,7 @@ export default function SettingsPage() {
       </div>
 
       {tab === 'general' && (
-        <div className="card form-card" style={{ maxWidth: 960 }}>
+        <div className="card form-card">
           <form onSubmit={saveGeneral}>
             <Field label="Systemname">
               <input
@@ -312,7 +307,7 @@ export default function SettingsPage() {
       )}
 
       {tab === 'labels' && (
-        <div className="card form-card" style={{ maxWidth: 960 }}>
+        <div className="card form-card">
           <form onSubmit={saveLabels}>
             <h2 className="section-title">Layout auf dem Papier (A4)</h2>
             <p className="form-hint" style={{ marginBottom: 16 }}>
@@ -411,7 +406,7 @@ export default function SettingsPage() {
       )}
 
       {tab === 'logo' && (
-        <div className="card form-card" style={{ maxWidth: 860 }}>
+        <div className="card form-card">
           <h2 className="section-title">Logo</h2>
           <div className="logo-preview">
             <img src={logoUrl} alt="Logo" className="logo-preview-img" />
@@ -432,10 +427,10 @@ export default function SettingsPage() {
       )}
 
       {tab === 'categories' && (
-        <div className="card form-card" style={{ maxWidth: 960 }}>
+        <div className="card form-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h2 className="section-title">Kategorien ({categories.length})</h2>
-            <button className="btn btn-primary" onClick={() => openCatModal(null)}>
+            <button className="btn btn-primary" onClick={() => navigate('/kategorien/new')}>
               <Icon name="plus" size={16} />
               Neue Kategorie
             </button>
@@ -461,7 +456,7 @@ export default function SettingsPage() {
                       <td>{c.item_count}</td>
                       <td>
                         <div className="row-actions">
-                          <button className="icon-btn" title="Bearbeiten" onClick={() => openCatModal(c)}>
+                          <button className="icon-btn" title="Bearbeiten" onClick={() => navigate(`/kategorien/edit?id=${c.id}`)}>
                             <Icon name="edit" size={16} />
                           </button>
                           <button className="icon-btn danger" title="Löschen" onClick={() => void deleteCategory(c)}>
@@ -479,33 +474,6 @@ export default function SettingsPage() {
       )}
 
       {tab === 'audit' && <AuditLog />}
-
-      {catModal.open && (
-        <Modal
-          title={catModal.category ? 'Kategorie bearbeiten' : 'Neue Kategorie'}
-          onClose={() => setCatModal({ open: false, category: null })}
-        >
-          <Field label="Name">
-            <input className="form-input" value={catName} onChange={(e) => setCatName(e.target.value)} />
-          </Field>
-          <Field label="Beschreibung">
-            <textarea
-              className="form-textarea"
-              rows={3}
-              value={catDesc}
-              onChange={(e) => setCatDesc(e.target.value)}
-            />
-          </Field>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setCatModal({ open: false, category: null })}>
-              Abbrechen
-            </button>
-            <button className="btn btn-primary" disabled={catBusy} onClick={() => void saveCategory()}>
-              Speichern
-            </button>
-          </div>
-        </Modal>
-      )}
     </>
   );
 }

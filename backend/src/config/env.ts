@@ -38,6 +38,10 @@ export const config = {
     database: process.env.DB_NAME ?? 'tms_lager',
   },
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  // Öffentliche Basis-URL für QR-Codes/Labels (z. B. https://host/lagersystem).
+  // Fallback auf den Host-Header nur in Development erlaubt: ein manipulierter
+  // Host würde sonst in gedruckte QR-Codes einfließen.
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL ?? '').replace(/\/+$/, ''),
   // Reverse-Proxy-Vertrauen. Voreinstellung in Produktion: nur Loopback
   // (Apache/nginx auf demselben Host). 'false' deaktiviert es komplett.
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
@@ -66,6 +70,11 @@ function assertProductionConfig(): void {
   }
   if (!config.db.password) {
     problems.push('DB_PASSWORD fehlt');
+  } else if (config.db.password === 'tms_lager_dev') {
+    // Der bekannte Development-Default aus .env.example darf nicht in
+    // Produktion laufen – sonst kann jeder, der die Repo-Datei gelesen hat,
+    // sich per localhost/lokaler DB-Verbindung einloggen.
+    problems.push('DB_PASSWORD ist noch der Development-Default "tms_lager_dev"');
   }
   if (config.cookieSameSite === 'none' && !config.cookieSecure) {
     problems.push('COOKIE_SAMESITE=none benötigt COOKIE_SECURE=true');

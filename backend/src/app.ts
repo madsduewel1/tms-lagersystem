@@ -28,6 +28,12 @@ import { documentsRouter } from './modules/documents/documents.routes.js';
 import { purchasesRouter } from './modules/purchases/purchases.routes.js';
 import { labelsRouter } from './modules/labels/labels.routes.js';
 import { resolveRouter } from './modules/resolve/resolve.routes.js';
+import { tasksRouter } from './modules/tasks/tasks.routes.js';
+import { boardRouter } from './modules/board/board.routes.js';
+import { notificationsRouter } from './modules/notifications/notifications.routes.js';
+import { messagesRouter } from './modules/messages/messages.routes.js';
+import { appointmentsRouter } from './modules/appointments/appointments.routes.js';
+import { rolesRouter, permissionsRouter } from './modules/roles/roles.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendDist = path.resolve(__dirname, '../../frontend/dist');
@@ -43,9 +49,26 @@ if (config.trustProxy !== false) {
 
 // HSTS nur aktivieren, wenn die App wirklich hinter TLS läuft. Sonst blockiert
 // der Browser nach dem ersten Besuch dauerhaft den Aufruf über http://.
+// CSP: zweiter Verteidigungsring gegen XSS. Die SPA lädt alles als externe
+// Datei (Vite-Build); 'unsafe-inline' ist nur für style-Attribute nötig,
+// Skripte bleiben strikt auf dieselbe Origin beschränkt.
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        fontSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'"],
+        upgradeInsecureRequests: config.hstsMaxAge > 0 ? [] : null,
+      },
+    },
     strictTransportSecurity: config.hstsMaxAge > 0
       ? { maxAge: config.hstsMaxAge, includeSubDomains: true }
       : false,
@@ -85,6 +108,13 @@ app.use('/api/documents', documentsRouter);
 app.use('/api/purchases', purchasesRouter);
 app.use('/api/labels', labelsRouter);
 app.use('/api/resolve', resolveRouter);
+app.use('/api/tasks', tasksRouter);
+app.use('/api/board', boardRouter);
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/messages', messagesRouter);
+app.use('/api/appointments', appointmentsRouter);
+app.use('/api/roles', rolesRouter);
+app.use('/api/permissions', permissionsRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });

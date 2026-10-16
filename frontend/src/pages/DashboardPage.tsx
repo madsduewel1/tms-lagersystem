@@ -9,20 +9,28 @@ interface TileDef {
   title: string;
   hint: string;
   color: string;
+  permission: string;
   wide?: boolean;
 }
 
+const teamTiles: TileDef[] = [
+  { to: '/aufgaben', icon: 'check-square', title: 'Aufgaben', hint: 'To-dos planen & zuweisen', color: 'indigo', permission: 'tasks.view' },
+  { to: '/kalender', icon: 'calendar', title: 'Kalender', hint: 'Termine & Events im Überblick', color: 'amber', permission: 'calendar.view' },
+  { to: '/pinnwand', icon: 'message-square', title: 'Pinnwand', hint: 'Aushänge & Team-Infos', color: 'teal', permission: 'board.view' },
+  { to: '/nachrichten', icon: 'mail', title: 'Nachrichten', hint: 'Direkter Austausch', color: 'blue', permission: 'messages.use' },
+];
+
 const technikTiles: TileDef[] = [
-  { to: '/inventar', icon: 'boxes', title: 'Inventar', hint: 'Geräte, Artikel & Suchfilter', color: 'blue' },
-  { to: '/lagerorte', icon: 'grid', title: 'Lagerorte', hint: 'Lager & Regale in Baumansicht', color: 'teal' },
-  { to: '/cases', icon: 'case', title: 'Cases', hint: 'Koffer mit Assets für Events', color: 'purple' },
-  { to: '/events', icon: 'calendar', title: 'Events', hint: 'Veranstaltungen planen & ausrüsten', color: 'amber' },
-  { to: '/labels', icon: 'qr', title: 'Labels', hint: 'QR-Labels drucken', color: 'indigo', wide: true },
+  { to: '/inventar', icon: 'boxes', title: 'Inventar', hint: 'Geräte, Artikel & Suchfilter', color: 'blue', permission: 'inventory.view' },
+  { to: '/lagerorte', icon: 'grid', title: 'Lagerorte', hint: 'Lager & Regale in Baumansicht', color: 'teal', permission: 'locations.view' },
+  { to: '/cases', icon: 'case', title: 'Cases', hint: 'Koffer mit Assets für Events', color: 'purple', permission: 'cases.view' },
+  { to: '/events', icon: 'calendar', title: 'Events', hint: 'Veranstaltungen planen & ausrüsten', color: 'amber', permission: 'events.view' },
+  { to: '/labels', icon: 'qr', title: 'Labels', hint: 'QR-Labels drucken', color: 'indigo', permission: 'labels.print', wide: true },
 ];
 
 const adminTiles: TileDef[] = [
-  { to: '/users', icon: 'user', title: 'Benutzer', hint: 'Benutzer & Rollen verwalten', color: 'pink' },
-  { to: '/settings', icon: 'settings', title: 'Einstellungen', hint: 'System, Logo, Audit-Log & Kategorien', color: 'green' },
+  { to: '/users', icon: 'user', title: 'Benutzer', hint: 'Benutzer, Rollen & Rechte verwalten', color: 'pink', permission: 'users.manage' },
+  { to: '/settings', icon: 'settings', title: 'Einstellungen', hint: 'System, Logo & Kategorien', color: 'green', permission: 'settings.manage' },
 ];
 
 function greetingText(date: Date): string {
@@ -33,13 +41,22 @@ function greetingText(date: Date): string {
 }
 
 function DashboardPage() {
-  const { user } = useAuth();
+  const { user, can, canAny } = useAuth();
   const settings = usePublicSettings();
-  const isAdmin = user?.role === 'administrator';
   const firstName = (user?.name ?? user?.username ?? '').trim().split(/\s+/)[0];
+
+  const visible = (tiles: TileDef[]) => tiles.filter((tile) => can(tile.permission));
   const groups = [
-    { key: 'technik', title: 'Technik', tiles: technikTiles },
-    { key: 'administration', title: 'Administration', tiles: isAdmin ? adminTiles : [] },
+    { key: 'team', title: 'Team & Organisation', tiles: visible(teamTiles) },
+    { key: 'technik', title: 'Technik', tiles: visible(technikTiles) },
+    {
+      key: 'administration',
+      title: 'Administration',
+      tiles: adminTiles.filter(
+        (tile) =>
+          can(tile.permission) || (tile.to === '/users' && canAny(['users.manage', 'roles.manage']))
+      ),
+    },
   ].filter((g) => g.tiles.length > 0);
 
   return (

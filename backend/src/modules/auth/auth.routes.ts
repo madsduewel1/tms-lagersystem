@@ -9,10 +9,10 @@ import {
   setTokenCookie,
   clearTokenCookie,
   signToken,
+  loadUserById,
 } from '../../middleware/auth.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { issueCsrfCookie } from '../../middleware/csrf.js';
-import type { RoleName } from '../../types/index.js';
 
 const loginSchema = z.object({
   username: z.string().min(1).max(160),
@@ -26,6 +26,20 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Zu viele Anmeldeversuche, bitte später erneut versuchen' },
 });
+
+// Passwort-Änderung: ohne Rate-Limit brute-forcebar (aktuelles Passwort),
+// auch wenn das Zielkonto selbst einen Passwort-Reset hatte.
+const passwordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Zu viele Versuche, bitte später erneut versuchen' },
+});
+
+// Vergleich gegen einen festen Hash, wenn kein Benutzer existiert: sonst
+// verrät die Antwortzeit (bcrypt fehlt komplett), ob es den Namen gibt.
+const DUMMY_HASH = '$2a$12$5a13mBkY3IWwMOiwmxzBQu1.4Nnlo2j9oekN6uLcldDD58A2Ot85S';
 
 export const authRouter = Router();
 
@@ -43,9 +57,8 @@ authRouter.post(
       const { username, password } = req.body as { username: string; password: string };
       const [rows] = await pool.query(
         `SELECT u.id, u.username, u.name, u.email, u.password_hash, u.active,
-                u.last_login_at, u.must_change_password, r.name AS role
+                u.last_login_at, u.must_change_password
          FROM users u
-         JOIN roles r ON r.id = u.role_id
          WHERE u.username = ? OR u.email = ?`,
         [username, username]
       );
@@ -57,12 +70,12 @@ authRouter.post(
         password_hash: string;
         active: number;
         must_change_password: number;
-        role: RoleName;
       }>)[0];
 
-      const validPassword = row
-        ? await bcrypt.compare(password, row.password_hash)
-        : false;
+      const validPassword = await bcrypt.compare(
+        password,
+        row?.password_hash ?? DUMMY_HASH
+      );
       if (!row || !validPassword) {
         throw new HttpError(401, 'Benutzername oder Passwort falsch');
       }
@@ -72,14 +85,10 @@ authRouter.post(
 
       await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = ?', [row.id]);
 
-      const user = {
-        id: row.id,
-        username: row.username,
-        name: row.name,
-        email: row.email,
-        role: row.role,
-        must_change_password: !!row.must_change_password,
-      };
+      const user = await loadUserById(row.id);
+      if (!user) {
+        throw new HttpError(403, 'Benutzer ist deaktiviert');
+      }
       const token = signToken(user);
       setTokenCookie(res, token);
       await writeAudit({
@@ -144,6 +153,7 @@ const passwordSchema = z.object({
 authRouter.post(
   '/password',
   requireAuth,
+  passwordLimiter,
   validate(passwordSchema),
   async (req, res, next) => {
     try {

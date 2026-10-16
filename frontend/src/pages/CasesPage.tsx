@@ -140,7 +140,7 @@ export default function CasesPage() {
                         >
                           <Icon name="qr" size={16} />
                         </a>
-                        <Link className="icon-btn" title="Bearbeiten" to={`/cases/new?id=${cas.id}`}>
+                        <Link className="icon-btn" title="Bearbeiten" to={`/cases/edit?id=${cas.id}`}>
                           <Icon name="edit" size={16} />
                         </Link>
                         <button

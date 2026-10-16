@@ -1,23 +1,20 @@
 import 'express';
 
-export type RoleName = 'administrator' | 'techniker';
+// Rollen sind seit der RBAC-Einführung frei definierbar; der Name ist daher
+// ein beliebiger String. Die Standardrollen 'administrator' und 'techniker'
+// bleiben systemseitig geschützt.
+export type RoleName = string;
 
 export interface Role {
   id: number;
   name: RoleName;
 }
 
-export interface User {
+/** Rollenzuordnung, wie sie im Benutzer-/Tokenkontext mitgeführt wird. */
+export interface RoleRef {
   id: number;
-  username: string;
   name: string;
-  password_hash: string;
-  role_id: number;
-  role: RoleName;
-  active: boolean;
-  last_login_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
+  label: string;
 }
 
 export interface AuthedUser {
@@ -25,7 +22,9 @@ export interface AuthedUser {
   username: string;
   name: string;
   email: string | null;
-  role: RoleName;
+  roles: RoleRef[];
+  permissions: string[];
+  isAdmin: boolean;
   must_change_password: boolean;
 }
 

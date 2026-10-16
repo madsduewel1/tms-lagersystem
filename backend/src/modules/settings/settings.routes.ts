@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { pool, type SqlRow } from '../../db/pool.js';
 import { config } from '../../config/env.js';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler } from '../../utils/helpers.js';
@@ -154,6 +154,7 @@ settingsRouter.use(requireAuth);
 
 settingsRouter.get(
   '/',
+  requirePermission('settings.manage'),
   asyncHandler(async (_req, res) => {
     res.json({ settings: await readSettings() });
   })
@@ -161,7 +162,7 @@ settingsRouter.get(
 
 settingsRouter.patch(
   '/',
-  requireRole('administrator'),
+  requirePermission('settings.manage'),
   validate(updateSchema),
   asyncHandler(async (req, res) => {
     const { settings } = req.body as { settings: Record<string, string | null> };
@@ -180,7 +181,7 @@ settingsRouter.patch(
 
 settingsRouter.post(
   '/logo',
-  requireRole('administrator'),
+  requirePermission('settings.manage'),
   logoUpload.single('logo'),
   asyncHandler(async (req, res) => {
     if (!req.file) {

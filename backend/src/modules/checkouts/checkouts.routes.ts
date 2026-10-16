@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { PoolConnection } from 'mysql2/promise';
 import { pool, type SqlRow } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, parseId, parseIntParam } from '../../utils/helpers.js';
@@ -26,6 +26,7 @@ const returnSchema = z.object({
 export const checkoutsRouter = Router();
 checkoutsRouter.use(requireAuth);
 
+checkoutsRouter.use(requirePermission('checkouts.manage'));
 async function performCheckout(
   conn: PoolConnection,
   opts: {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool, type SqlRow } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireModule } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, newToken, parseId } from '../../utils/helpers.js';
@@ -48,6 +48,7 @@ async function getCase(id: number) {
 export const casesRouter = Router();
 casesRouter.use(requireAuth);
 
+casesRouter.use(requireModule('cases.view', 'cases.manage'));
 casesRouter.get(
   '/',
   asyncHandler(async (_req, res) => {

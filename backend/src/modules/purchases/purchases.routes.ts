@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { PoolConnection } from 'mysql2/promise';
 import { pool } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, newToken, parseId } from '../../utils/helpers.js';
@@ -126,6 +126,7 @@ async function applyToStock(
 export const purchasesRouter = Router();
 purchasesRouter.use(requireAuth);
 
+purchasesRouter.use(requirePermission('purchases.manage'));
 purchasesRouter.get(
   '/',
   asyncHandler(async (_req, res) => {

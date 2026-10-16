@@ -36,11 +36,11 @@ export const MODULES: ModuleDef[] = [
   },
 ];
 
-export function modulesForRole(role: RoleName): ModuleDef[] {
-  return MODULES.filter((m) => m.roles.includes(role));
+export function modulesForRoles(names: string[]): ModuleDef[] {
+  return MODULES.filter((m) => m.roles.some((r) => names.includes(r)));
 }
 
-export function canAccessModule(role: RoleName, key: string): boolean {
+export function canAccessModule(names: string[], key: string): boolean {
   const mod = MODULES.find((m) => m.key === key);
-  return Boolean(mod && mod.roles.includes(role));
+  return Boolean(mod && mod.roles.some((r) => names.includes(r)));
 }

@@ -16,6 +16,10 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** true, wenn der angemeldete Benutzer das angegebene Recht besitzt. */
+  can: (code: string) => boolean;
+  /** true, wenn der angemeldete Benutzer mindestens eines der Rechte besitzt. */
+  canAny: (codes: string[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -63,8 +67,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const permissions = user?.permissions ?? [];
+  const can = (code: string) => permissions.includes(code);
+  const canAny = (codes: string[]) => codes.some((code) => permissions.includes(code));
+
   return (
-    <AuthContext.Provider value={{ user, loading, connectionError, login, logout, refresh }}>
+    <AuthContext.Provider
+      value={{ user, loading, connectionError, login, logout, refresh, can, canAny }}
+    >
       {children}
     </AuthContext.Provider>
   );

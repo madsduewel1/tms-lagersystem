@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { pool, type SqlRow } from '../../db/pool.js';
 import { config } from '../../config/env.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, parseId } from '../../utils/helpers.js';
@@ -22,9 +22,78 @@ const storage = multer.diskStorage({
   },
 });
 
+/**
+ * Erlaubte Dokumenttypen. Bewusst als Allowlist: bisher wurde jede Datei bis
+ * 25 MB abgelegt (Malware-Ablage, Speicherfüllung).
+ */
+const ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'text/plain',
+  'text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/zip',
+]);
+
+const ALLOWED_EXTENSIONS = new Set([
+  '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.txt', '.csv',
+  '.doc', '.docx', '.xls', '.xlsx', '.zip',
+]);
+
+/**
+ * Magic-Byte-Prüfung: `file.mimetype` und Dateiendung stammen vom Client und
+ * sind frei wählbar. Ein abgelegtes HTML/SVG, das sich als PNG ausgibt, wäre
+ * über einen Fehler im Download-Pfad trotzdem gefährlich – deshalb muss der
+ * Dateianfang wirklich zum gemeldeten Typ passen.
+ */
+function matchesMagicBytes(header: Buffer, mime: string): boolean {
+  const starts = (...bytes: number[]) => bytes.every((b, i) => header[i] === b);
+  switch (mime) {
+    case 'application/pdf':
+      return header.subarray(0, 5).toString('latin1') === '%PDF-';
+    case 'image/png':
+      return starts(0x89, 0x50, 0x4e, 0x47);
+    case 'image/jpeg':
+      return starts(0xff, 0xd8, 0xff);
+    case 'image/gif':
+      return header.subarray(0, 6).toString('latin1') === 'GIF87a' ||
+        header.subarray(0, 6).toString('latin1') === 'GIF89a';
+    case 'image/webp':
+      return header.subarray(0, 4).toString('latin1') === 'RIFF' &&
+        header.subarray(8, 12).toString('latin1') === 'WEBP';
+    case 'application/zip':
+    case 'application/msword':
+    case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    case 'application/vnd.ms-excel':
+    case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+      // DOC (altes OLE2) beginnt mit D0 CF 11 E0, DOCX/XLSX/ZIP mit PK.
+      return starts(0x50, 0x4b) || starts(0xd0, 0xcf, 0x11, 0xe0);
+    case 'text/plain':
+    case 'text/csv':
+      // Text darf keine NUL-Bytes enthalten (sonst binär getarnt).
+      return !header.includes(0x00);
+    default:
+      return false;
+  }
+}
+
 const upload = multer({
   storage,
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype) || !ALLOWED_EXTENSIONS.has(ext)) {
+      cb(new HttpError(400, `Dateityp nicht erlaubt (erlaubt: PDF, Bilder, Office, TXT, CSV, ZIP)`));
+      return;
+    }
+    cb(null, true);
+  },
 });
 
 const DOC_TYPES = [
@@ -60,6 +129,7 @@ const INLINE_MIME_TYPES = new Set([
 export const documentsRouter = Router();
 documentsRouter.use(requireAuth);
 
+documentsRouter.use(requirePermission('documents.manage'));
 documentsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -88,48 +158,75 @@ documentsRouter.get(
   })
 );
 
+function headerBytes(filePath: string): Buffer {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(16);
+    const n = fs.readSync(fd, buf, 0, 16, 0);
+    return buf.subarray(0, n);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 documentsRouter.post(
   '/',
   upload.single('file'),
-  validate(createSchema),
+  // Validierung läuft nach dem Schreiben der Datei. Schlägt sie fehl, blieb
+  // die Datei bisher liegen (Disk-Erschöpfung durch wiederholte Requests).
+  (req, res, next) => {
+    validate(createSchema)(req, res, (err) => {
+      if (err && req.file) removeUploadsFile(req.file.filename);
+      next(err);
+    });
+  },
   asyncHandler(async (req, res) => {
     const file = req.file;
     if (!file) throw new HttpError(400, 'Keine Datei übermittelt');
-    const body = req.body as z.infer<typeof createSchema>;
-    // originalname ist maximal 255 Zeichen in der DB.
-    const originalName = file.originalname.slice(0, 255);
-    const title = (body.title?.trim() || originalName).slice(0, 200);
-    const docType = body.doc_type ?? 'sonstiges';
-    const itemId = body.item_id ?? null;
-    const notes = body.notes?.trim() ? body.notes.trim() : null;
-    const mimeType = file.mimetype.slice(0, 128);
+    try {
+      if (!matchesMagicBytes(headerBytes(file.path), file.mimetype)) {
+        throw new HttpError(400, 'Dateiinhalt passt nicht zum angegebenen Dateityp');
+      }
+      const body = req.body as z.infer<typeof createSchema>;
+      // originalname ist maximal 255 Zeichen in der DB.
+      const originalName = file.originalname.slice(0, 255);
+      const title = (body.title?.trim() || originalName).slice(0, 200);
+      const docType = body.doc_type ?? 'sonstiges';
+      const itemId = body.item_id ?? null;
+      const notes = body.notes?.trim() ? body.notes.trim() : null;
+      const mimeType = file.mimetype.slice(0, 128);
 
-    const [result] = await pool.query(
-      `INSERT INTO documents
-        (title, doc_type, item_id, stored_name, original_name, mime_type, size_bytes, notes, uploaded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        title,
-        docType,
-        itemId,
-        file.filename,
-        originalName,
-        mimeType,
-        file.size,
-        notes,
-        req.user!.id,
-      ]
-    );
-    const id = Number((result as { insertId: number }).insertId);
-    await writeAudit({
-      userId: req.user!.id,
-      action: 'document_uploaded',
-      targetType: 'document',
-      targetId: String(id),
-      details: { title, doc_type: docType, item_id: itemId },
-      ip: req.ip,
-    });
-    res.status(201).json({ id });
+      const [result] = await pool.query(
+        `INSERT INTO documents
+          (title, doc_type, item_id, stored_name, original_name, mime_type, size_bytes, notes, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          title,
+          docType,
+          itemId,
+          file.filename,
+          originalName,
+          mimeType,
+          file.size,
+          notes,
+          req.user!.id,
+        ]
+      );
+      const id = Number((result as { insertId: number }).insertId);
+      await writeAudit({
+        userId: req.user!.id,
+        action: 'document_uploaded',
+        targetType: 'document',
+        targetId: String(id),
+        details: { title, doc_type: docType, item_id: itemId },
+        ip: req.ip,
+      });
+      res.status(201).json({ id });
+    } catch (err) {
+      // DB- oder Validierungsfehler nach dem Schreiben: Datei nicht hängenlassen.
+      removeUploadsFile(file.filename);
+      throw err;
+    }
   })
 );
 

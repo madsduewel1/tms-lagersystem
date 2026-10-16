@@ -218,7 +218,7 @@ export default function InventoryPage() {
                         <button
                           className="icon-btn"
                           title="Bearbeiten"
-                          onClick={() => navigate(`/inventar/new?id=${it.id}`)}
+                          onClick={() => navigate(`/inventar/edit?id=${it.id}`)}
                         >
                           <Icon name="edit" size={16} />
                         </button>

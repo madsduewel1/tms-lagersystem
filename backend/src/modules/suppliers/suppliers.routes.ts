@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, parseId } from '../../utils/helpers.js';
@@ -21,6 +21,7 @@ const updateSchema = schema.partial();
 export const suppliersRouter = Router();
 suppliersRouter.use(requireAuth);
 
+suppliersRouter.use(requirePermission('suppliers.manage'));
 suppliersRouter.get(
   '/',
   asyncHandler(async (_req, res) => {

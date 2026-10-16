@@ -117,10 +117,10 @@ export function AccountModal({
           <Field label="Benutzername">
             <input className="form-input" value={user?.username ?? ''} disabled />
           </Field>
-          <Field label="Rolle">
+          <Field label={user && user.roles.length > 1 ? 'Rollen' : 'Rolle'}>
             <input
               className="form-input"
-              value={user?.role === 'administrator' ? 'Administrator' : 'Techniker'}
+              value={user?.roles.map((r) => r.label).join(', ') ?? ''}
               disabled
             />
           </Field>

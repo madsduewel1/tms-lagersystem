@@ -7,12 +7,102 @@
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS roles (
-  id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
-  name VARCHAR(32) NOT NULL UNIQUE
+  id TINYINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(32) NOT NULL UNIQUE,
+  label VARCHAR(64) NOT NULL,
+  description VARCHAR(255) NULL,
+  is_system TINYINT(1) NOT NULL DEFAULT 0,
+  sort SMALLINT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO roles (id, name) VALUES (1, 'administrator'), (2, 'techniker')
-  ON DUPLICATE KEY UPDATE name = VALUES(name);
+INSERT INTO roles (id, name, label, description, is_system, sort) VALUES
+  (1, 'administrator', 'Administrator', 'Vollzugriff auf alle Bereiche', 1, 1),
+  (2, 'techniker', 'Techniker', 'Operative Rechte ohne Administration', 1, 2)
+  ON DUPLICATE KEY UPDATE
+    label = VALUES(label),
+    description = VALUES(description),
+    is_system = VALUES(is_system),
+    sort = VALUES(sort);
+
+-- ---------------------------------------------------------------------------
+-- Rechte-Katalog und Zuordnung zu Rollen
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS permissions (
+  id SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(64) NOT NULL UNIQUE,
+  label VARCHAR(96) NOT NULL,
+  category VARCHAR(48) NOT NULL,
+  sort SMALLINT NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO permissions (code, label, category, sort) VALUES
+  ('tasks.view', 'Aufgaben ansehen', 'Team & Organisation', 10),
+  ('tasks.manage', 'Aufgaben verwalten', 'Team & Organisation', 11),
+  ('board.view', 'Pinnwand ansehen', 'Team & Organisation', 20),
+  ('board.manage', 'Pinnwand verwalten', 'Team & Organisation', 21),
+  ('calendar.view', 'Kalender ansehen', 'Team & Organisation', 30),
+  ('calendar.manage', 'Termine verwalten', 'Team & Organisation', 31),
+  ('messages.use', 'Nachrichten nutzen', 'Team & Organisation', 40),
+  ('inventory.view', 'Inventar ansehen', 'Technik', 110),
+  ('inventory.manage', 'Inventar verwalten', 'Technik', 111),
+  ('locations.view', 'Lagerorte ansehen', 'Technik', 120),
+  ('locations.manage', 'Lagerorte verwalten', 'Technik', 121),
+  ('cases.view', 'Cases ansehen', 'Technik', 130),
+  ('cases.manage', 'Cases verwalten', 'Technik', 131),
+  ('events.view', 'Events ansehen', 'Technik', 140),
+  ('events.manage', 'Events verwalten', 'Technik', 141),
+  ('labels.print', 'Labels drucken', 'Technik', 150),
+  ('maintenance.view', 'Wartung ansehen', 'Technik', 160),
+  ('maintenance.manage', 'Wartung verwalten', 'Technik', 161),
+  ('documents.manage', 'Dokumente verwalten', 'Technik', 170),
+  ('purchases.manage', 'Bestellungen verwalten', 'Technik', 180),
+  ('suppliers.manage', 'Lieferanten verwalten', 'Technik', 190),
+  ('checkouts.manage', 'Ausgaben & Rückgaben verwalten', 'Technik', 200),
+  ('users.manage', 'Benutzer verwalten', 'Administration', 310),
+  ('roles.manage', 'Rollen & Rechte verwalten', 'Administration', 320),
+  ('settings.manage', 'Einstellungen verwalten', 'Administration', 330),
+  ('categories.manage', 'Kategorien verwalten', 'Administration', 340),
+  ('audit.view', 'Audit-Log ansehen', 'Administration', 350)
+  ON DUPLICATE KEY UPDATE
+    label = VALUES(label),
+    category = VALUES(category),
+    sort = VALUES(sort);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id TINYINT UNSIGNED NOT NULL,
+  permission_id SMALLINT UNSIGNED NOT NULL,
+  PRIMARY KEY (role_id, permission_id),
+  CONSTRAINT fk_role_permissions_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_role_permissions_permission FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Administrator erhält sämtliche Rechte.
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+  SELECT r.id, p.id FROM roles r CROSS JOIN permissions p WHERE r.name = 'administrator';
+
+-- Techniker erhält alle operativen, aber keine administrativen Rechte.
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+  SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
+  WHERE r.name = 'techniker'
+    AND p.code NOT IN ('users.manage', 'roles.manage', 'settings.manage', 'categories.manage', 'audit.view');
+
+-- Welche Rollen darf der Inhaber einer Rolle an Benutzer vergeben?
+CREATE TABLE IF NOT EXISTS role_assignable_roles (
+  role_id TINYINT UNSIGNED NOT NULL,
+  assignable_role_id TINYINT UNSIGNED NOT NULL,
+  PRIMARY KEY (role_id, assignable_role_id),
+  CONSTRAINT fk_rar_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_rar_assignable FOREIGN KEY (assignable_role_id) REFERENCES roles(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Standard: jede Rolle darf alle Rollen außer der Administratorrolle vergeben.
+INSERT IGNORE INTO role_assignable_roles (role_id, assignable_role_id)
+  SELECT r.id, a.id FROM roles r CROSS JOIN roles a WHERE a.name <> 'administrator';
+
+-- Die Administratorrolle darf zusätzlich auch die Administratorrolle vergeben.
+INSERT IGNORE INTO role_assignable_roles (role_id, assignable_role_id)
+  SELECT r.id, a.id FROM roles r CROSS JOIN roles a WHERE r.name = 'administrator';
 
 CREATE TABLE IF NOT EXISTS users (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -20,13 +110,20 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(160) NULL UNIQUE,
   name VARCHAR(128) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role_id TINYINT UNSIGNED NOT NULL,
   active TINYINT(1) NOT NULL DEFAULT 1,
   must_change_password TINYINT(1) NOT NULL DEFAULT 0,
   last_login_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Mehrere Rollen pro Benutzer (n:m).
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id INT UNSIGNED NOT NULL,
+  role_id TINYINT UNSIGNED NOT NULL,
+  PRIMARY KEY (user_id, role_id),
+  CONSTRAINT fk_user_roles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_user_roles_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -459,3 +556,114 @@ INSERT INTO categories (name, description) VALUES
 
 -- Keine Beispiel-Lagerplätze, Items, Events oder Benutzer: eine frische
 -- Installation startet komplett leer (Lagerstruktur wird im Inventar angelegt).
+
+-- ---------------------------------------------------------------------------
+-- Team-Module: Aufgaben, Pinnwand, Benachrichtigungen, Nachrichten,
+-- Anwesenheit, Termine
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(200) NOT NULL,
+  description TEXT NULL,
+  status ENUM('offen','in_arbeit','erledigt','abgebrochen') NOT NULL DEFAULT 'offen',
+  priority ENUM('niedrig','normal','hoch') NOT NULL DEFAULT 'normal',
+  assignee_id INT UNSIGNED NULL,
+  created_by INT UNSIGNED NULL,
+  due_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  completed_by INT UNSIGNED NULL,
+  item_id INT UNSIGNED NULL,
+  event_id INT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_tasks_status (status),
+  INDEX idx_tasks_assignee (assignee_id),
+  INDEX idx_tasks_due (due_at),
+  CONSTRAINT fk_tasks_assignee FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_tasks_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_tasks_completed_by FOREIGN KEY (completed_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_tasks_item FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL,
+  CONSTRAINT fk_tasks_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS posts (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  author_id INT UNSIGNED NULL,
+  title VARCHAR(200) NULL,
+  body TEXT NOT NULL,
+  pinned TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_posts_pinned (pinned),
+  INDEX idx_posts_created (created_at),
+  CONSTRAINT fk_posts_author FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS post_comments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  post_id BIGINT UNSIGNED NOT NULL,
+  author_id INT UNSIGNED NULL,
+  body TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_post_comments_post (post_id),
+  CONSTRAINT fk_post_comments_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_post_comments_author FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  type VARCHAR(40) NOT NULL DEFAULT 'system',
+  title VARCHAR(200) NOT NULL,
+  body VARCHAR(512) NULL,
+  link VARCHAR(300) NULL,
+  read_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_notifications_user (user_id, read_at),
+  INDEX idx_notifications_created (created_at),
+  CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS messages (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT UNSIGNED NOT NULL,
+  recipient_id INT UNSIGNED NOT NULL,
+  body TEXT NOT NULL,
+  read_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_messages_sender (sender_id),
+  INDEX idx_messages_recipient (recipient_id),
+  INDEX idx_messages_created (created_at),
+  CONSTRAINT fk_messages_sender FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_messages_recipient FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS attendance (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  work_date DATE NOT NULL,
+  check_in DATETIME NULL,
+  check_out DATETIME NULL,
+  note VARCHAR(512) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_attendance_user_date (user_id, work_date),
+  INDEX idx_attendance_date (work_date),
+  CONSTRAINT fk_attendance_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS appointments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(200) NOT NULL,
+  description TEXT NULL,
+  location VARCHAR(200) NULL,
+  starts_at DATETIME NOT NULL,
+  ends_at DATETIME NULL,
+  all_day TINYINT(1) NOT NULL DEFAULT 0,
+  created_by INT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_appointments_start (starts_at),
+  CONSTRAINT fk_appointments_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

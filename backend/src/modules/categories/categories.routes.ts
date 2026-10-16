@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
 import { asyncHandler, parseId } from '../../utils/helpers.js';
@@ -30,6 +30,7 @@ categoriesRouter.get(
 
 categoriesRouter.post(
   '/',
+  requirePermission('categories.manage'),
   validate(schema),
   asyncHandler(async (req, res) => {
     const { name, description } = req.body as { name: string; description?: string };
@@ -52,6 +53,7 @@ categoriesRouter.post(
 
 categoriesRouter.patch(
   '/:id',
+  requirePermission('categories.manage'),
   validate(updateSchema),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
@@ -84,6 +86,7 @@ categoriesRouter.patch(
 
 categoriesRouter.delete(
   '/:id',
+  requirePermission('categories.manage'),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const [result] = await pool.query('DELETE FROM categories WHERE id = ?', [id]);

@@ -1,7 +1,8 @@
 import { Router, type Request } from 'express';
 import QRCode from 'qrcode';
+import { config, isProduction } from '../../config/env.js';
 import { pool, type SqlRow } from '../../db/pool.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { HttpError } from '../../middleware/error.js';
 import { asyncHandler } from '../../utils/helpers.js';
 import { getSetting } from '../items/items.service.js';
@@ -15,6 +16,7 @@ import {
 export const labelsRouter = Router();
 labelsRouter.use(requireAuth);
 
+labelsRouter.use(requirePermission('labels.print'));
 function idsFromQuery(value: unknown): number[] | undefined {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   return value
@@ -64,7 +66,15 @@ function parseFormat(req: Request) {
 async function qrBaseUrl(req: Request): Promise<string> {
   const configured = await getSetting('qr_base_url', '');
   if (configured) return configured.replace(/\/+$/, '');
-  return `${req.protocol}://${req.get('host')}/lagersystem`;
+  if (config.publicBaseUrl) return config.publicBaseUrl;
+  // Host-Header nur im Development als Fallback: über einen manipulierten
+  // Host ließe sich sonst der QR-Code-Target (inkl. Cache: public, 24h)
+  // auf eine fremde Domain umleiten.
+  if (!isProduction) return `${req.protocol}://${req.get('host')}/lagersystem`;
+  throw new HttpError(
+    500,
+    'Keine Basis-URL für QR-Codes konfiguriert (Einstellungen oder PUBLIC_BASE_URL)'
+  );
 }
 
 labelsRouter.get(

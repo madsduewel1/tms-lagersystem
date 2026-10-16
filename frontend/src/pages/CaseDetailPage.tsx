@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, ApiError, fileUrl } from '../api/client';
-import { PageHeader, Alert, Loading, Modal, Field, Badge } from '../components/ui';
+import { PageHeader, Alert, Loading, Badge } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { NotFound } from '../components/NotFound';
 import type { CaseItem, CaseRow, Item } from '../types';
@@ -145,7 +145,7 @@ export default function CaseDetailPage() {
               <Icon name="qr" size={16} />
               Label
             </a>
-            <Link className="btn btn-primary" to={`/cases/new?id=${cas.id}`}>
+            <Link className="btn btn-primary" to={`/cases/edit?id=${cas.id}`}>
               <Icon name="edit" size={16} />
               Bearbeiten
             </Link>
@@ -237,61 +237,66 @@ export default function CaseDetailPage() {
           ) : (
             <p className="empty-row">Noch keine Assets im Koffer.</p>
           )}
-          <div className="toolbar">
-            <button className="btn btn-primary btn-sm" onClick={() => setItemModal(true)}>
-              <Icon name="plus" size={16} />
-              Asset hinzufügen
-            </button>
-          </div>
+          {itemModal ? (
+            <div className="inline-add inline-add-wrap">
+              <select
+                className="form-select"
+                value={selectedItem}
+                onChange={(e) => setSelectedItem(e.target.value)}
+                autoFocus
+              >
+                <option value="">– Asset wählen –</option>
+                {freeAssets.map((d) => (
+                  <option key={d.id} value={String(d.id)}>
+                    {d._kindLabel}: {d.inventory_number ? `${d.inventory_number} – ` : ''}
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="form-input qty-input"
+                type="number"
+                min={1}
+                title="Menge"
+                value={itemQty}
+                onChange={(e) => setItemQty(e.target.value)}
+              />
+              <input
+                className="form-input"
+                placeholder="Notiz (optional)"
+                value={itemNote}
+                onChange={(e) => setItemNote(e.target.value)}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={!selectedItem}
+                onClick={() => void addItem()}
+              >
+                <Icon name="check" size={16} />
+                Hinzufügen
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  setItemModal(false);
+                  setSelectedItem('');
+                  setItemQty('1');
+                  setItemNote('');
+                }}
+              >
+                Abbrechen
+              </button>
+            </div>
+          ) : (
+            <div className="toolbar">
+              <button className="btn btn-primary btn-sm" onClick={() => setItemModal(true)}>
+                <Icon name="plus" size={16} />
+                Asset hinzufügen
+              </button>
+            </div>
+          )}
         </section>
       </div>
-
-      {itemModal && (
-        <Modal title="Asset hinzufügen" onClose={() => setItemModal(false)}>
-          <Field label="Asset auswählen">
-            <select
-              className="form-select"
-              value={selectedItem}
-              onChange={(e) => setSelectedItem(e.target.value)}
-            >
-              <option value="">– Asset wählen –</option>
-              {freeAssets.map((d) => (
-                <option key={d.id} value={String(d.id)}>
-                  {d._kindLabel}: {d.inventory_number ? `${d.inventory_number} – ` : ''}{d.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Menge">
-            <input
-              className="form-input"
-              type="number"
-              min={1}
-              value={itemQty}
-              onChange={(e) => setItemQty(e.target.value)}
-            />
-          </Field>
-          <Field label="Notiz">
-            <input
-              className="form-input"
-              value={itemNote}
-              onChange={(e) => setItemNote(e.target.value)}
-            />
-          </Field>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setItemModal(false)}>
-              Abbrechen
-            </button>
-            <button
-              className="btn btn-primary"
-              disabled={!selectedItem}
-              onClick={() => void addItem()}
-            >
-              Hinzufügen
-            </button>
-          </div>
-        </Modal>
-      )}
     </>
   );
 }

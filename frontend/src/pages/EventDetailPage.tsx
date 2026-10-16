@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
-import { PageHeader, Alert, Loading, StatusBadge, Modal, Field, Badge } from '../components/ui';
+import { PageHeader, Alert, Loading, StatusBadge, Badge } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { NotFound } from '../components/NotFound';
 import QrScannerModal from '../components/QrScannerModal';
@@ -344,7 +344,7 @@ export default function EventDetailPage() {
             <StatusBadge status={ev.status} label={eventStatusLabels[ev.status]} />
             {canEdit && (
               <>
-                <Link className="btn btn-primary" to={`/events/new?id=${ev.id}`}>
+                <Link className="btn btn-primary" to={`/events/edit?id=${ev.id}`}>
                   <Icon name="edit" size={16} />
                   Bearbeiten
                 </Link>
@@ -518,14 +518,59 @@ export default function EventDetailPage() {
               </table>
             </div>
           )}
-          {canEdit && (
-            <div className="toolbar">
-              <button className="btn btn-primary btn-sm" onClick={() => setDeviceModal(true)}>
-                <Icon name="plus" size={16} />
-                Gerät hinzufügen
-              </button>
-            </div>
-          )}
+          {canEdit &&
+            (deviceModal ? (
+              <div className="inline-add">
+                <select
+                  className="form-select"
+                  value={selectedDevice}
+                  onChange={(e) => setSelectedDevice(e.target.value)}
+                  autoFocus
+                >
+                  <option value="">– Gerät wählen –</option>
+                  {freeDevices.map((d) => (
+                    <option key={d.id} value={String(d.id)}>
+                      {d.inventory_number ? `${d.inventory_number} – ` : ''}
+                      {d.name}
+                      {d.location_path ? ` (${d.location_path})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="form-input qty-input"
+                  type="number"
+                  min={1}
+                  title="Stückzahl (Bedarf)"
+                  value={deviceQty}
+                  onChange={(e) => setDeviceQty(e.target.value)}
+                />
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!selectedDevice}
+                  onClick={() => void addDevice()}
+                >
+                  <Icon name="check" size={16} />
+                  Einplanen
+                </button>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    setDeviceModal(false);
+                    setSelectedDevice('');
+                    setDeviceQty('1');
+                  }}
+                >
+                  Abbrechen
+                </button>
+              </div>
+            ) : (
+              <div className="toolbar">
+                <button className="btn btn-primary btn-sm" onClick={() => setDeviceModal(true)}>
+                  <Icon name="plus" size={16} />
+                  Gerät hinzufügen
+                </button>
+              </div>
+            ))}
         </section>
       </div>
 
@@ -574,14 +619,59 @@ export default function EventDetailPage() {
             </table>
           </div>
         )}
-        {canEdit && (
-          <div className="toolbar">
-            <button className="btn btn-primary btn-sm" onClick={() => setItemModal(true)}>
-              <Icon name="plus" size={16} />
-              Artikel hinzufügen
-            </button>
-          </div>
-        )}
+        {canEdit &&
+          (itemModal ? (
+            <div className="inline-add">
+              <select
+                className="form-select"
+                value={selectedItem}
+                onChange={(e) => setSelectedItem(e.target.value)}
+                autoFocus
+              >
+                <option value="">– Artikel wählen –</option>
+                {freeItems.map((d) => (
+                  <option key={d.id} value={String(d.id)}>
+                    {d.inventory_number ? `${d.inventory_number} – ` : ''}
+                    {d.name}
+                    {d.unit ? ` (${d.quantity} ${d.unit} verfügbar)` : ''}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="form-input qty-input"
+                type="number"
+                min={1}
+                title="Menge"
+                value={itemQty}
+                onChange={(e) => setItemQty(e.target.value)}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={!selectedItem}
+                onClick={() => void addItem()}
+              >
+                <Icon name="check" size={16} />
+                Einplanen
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  setItemModal(false);
+                  setSelectedItem('');
+                  setItemQty('1');
+                }}
+              >
+                Abbrechen
+              </button>
+            </div>
+          ) : (
+            <div className="toolbar">
+              <button className="btn btn-primary btn-sm" onClick={() => setItemModal(true)}>
+                <Icon name="plus" size={16} />
+                Artikel hinzufügen
+              </button>
+            </div>
+          ))}
       </section>
 
       <section className="card" style={{ marginTop: 20 }}>
@@ -629,130 +719,51 @@ export default function EventDetailPage() {
             </table>
           </div>
         )}
-        {canEdit && (
-          <div className="toolbar">
-            <button className="btn btn-primary btn-sm" onClick={() => setCaseModal(true)}>
-              <Icon name="plus" size={16} />
-              Koffer hinzufügen
-            </button>
-          </div>
-        )}
+        {canEdit &&
+          (caseModal ? (
+            <div className="inline-add">
+              <select
+                className="form-select"
+                value={selectedCase}
+                onChange={(e) => setSelectedCase(e.target.value)}
+                autoFocus
+              >
+                <option value="">– Koffer wählen –</option>
+                {freeCases.map((d) => (
+                  <option key={d.id} value={String(d.id)}>
+                    {d.code ? `${d.code} – ` : ''}
+                    {d.name}
+                    {d.location_path ? ` (${d.location_path})` : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={!selectedCase}
+                onClick={() => void addCase()}
+              >
+                <Icon name="check" size={16} />
+                Einplanen
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  setCaseModal(false);
+                  setSelectedCase('');
+                }}
+              >
+                Abbrechen
+              </button>
+            </div>
+          ) : (
+            <div className="toolbar">
+              <button className="btn btn-primary btn-sm" onClick={() => setCaseModal(true)}>
+                <Icon name="plus" size={16} />
+                Koffer hinzufügen
+              </button>
+            </div>
+          ))}
       </section>
-
-      {deviceModal && (
-        <Modal title="Gerät hinzufügen" onClose={() => setDeviceModal(false)}>
-          <Field label="Gerät auswählen">
-            <select
-              className="form-select"
-              value={selectedDevice}
-              onChange={(e) => setSelectedDevice(e.target.value)}
-            >
-              <option value="">– Gerät wählen –</option>
-              {freeDevices.map((d) => (
-                <option key={d.id} value={String(d.id)}>
-                  {d.inventory_number ? `${d.inventory_number} – ` : ''}{d.name}
-                  {d.location_path ? ` (${d.location_path})` : ''}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Stückzahl (Bedarf)">
-            <input
-              className="form-input"
-              type="number"
-              min={1}
-              value={deviceQty}
-              onChange={(e) => setDeviceQty(e.target.value)}
-            />
-            <div className="form-hint">Wie viele Stück dieses Geräts werden benötigt.</div>
-          </Field>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setDeviceModal(false)}>
-              Abbrechen
-            </button>
-            <button
-              className="btn btn-primary"
-              disabled={!selectedDevice}
-              onClick={() => void addDevice()}
-            >
-              Hinzufügen
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {itemModal && (
-        <Modal title="Artikel hinzufügen" onClose={() => setItemModal(false)}>
-          <Field label="Artikel auswählen">
-            <select
-              className="form-select"
-              value={selectedItem}
-              onChange={(e) => setSelectedItem(e.target.value)}
-            >
-              <option value="">– Artikel wählen –</option>
-              {freeItems.map((d) => (
-                <option key={d.id} value={String(d.id)}>
-                  {d.inventory_number ? `${d.inventory_number} – ` : ''}{d.name}
-                  {d.unit ? ` (${d.quantity} ${d.unit} verfügbar)` : ''}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Menge">
-            <input
-              className="form-input"
-              type="number"
-              min={1}
-              value={itemQty}
-              onChange={(e) => setItemQty(e.target.value)}
-            />
-          </Field>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setItemModal(false)}>
-              Abbrechen
-            </button>
-            <button
-              className="btn btn-primary"
-              disabled={!selectedItem}
-              onClick={() => void addItem()}
-            >
-              Hinzufügen
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {caseModal && (
-        <Modal title="Koffer hinzufügen" onClose={() => setCaseModal(false)}>
-          <Field label="Koffer auswählen">
-            <select
-              className="form-select"
-              value={selectedCase}
-              onChange={(e) => setSelectedCase(e.target.value)}
-            >
-              <option value="">– Koffer wählen –</option>
-              {freeCases.map((d) => (
-                <option key={d.id} value={String(d.id)}>
-                  {d.code ? `${d.code} – ` : ''}{d.name}
-                  {d.location_path ? ` (${d.location_path})` : ''}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setCaseModal(false)}>
-              Abbrechen
-            </button>
-            <button
-              className="btn btn-primary"
-              disabled={!selectedCase}
-              onClick={() => void addCase()}
-            >
-              Hinzufügen
-            </button>
-          </div>
-        </Modal>
-      )}
 
       {scannerOpen && (
         <QrScannerModal
