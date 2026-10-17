@@ -93,7 +93,7 @@ export function AuditLog() {
           <p className="empty-row">Noch keine Einträge vorhanden.</p>
         ) : (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack">
               <thead>
                 <tr>
                   <th>Zeitpunkt</th>

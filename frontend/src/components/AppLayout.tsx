@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { usePublicSettings } from '../hooks/usePublicSettings';
+import { useStackedTables } from '../hooks/useStackedTables';
 import { Icon } from './Icon';
 import { AccountModal } from './AccountModal';
 import { GlobalSearch } from './GlobalSearch';
@@ -17,6 +18,7 @@ function initialsOf(name: string): string {
 function AppLayout() {
   const { user, logout } = useAuth();
   const settings = usePublicSettings();
+  useStackedTables();
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountTab, setAccountTab] = useState<'account' | 'password' | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);

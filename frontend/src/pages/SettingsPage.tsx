@@ -439,7 +439,7 @@ export default function SettingsPage() {
             <p className="empty-row">Noch keine Kategorien angelegt.</p>
           ) : (
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table--stack">
                 <thead>
                   <tr>
                     <th>Name</th>

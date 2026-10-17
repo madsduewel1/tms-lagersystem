@@ -98,7 +98,7 @@ export default function EventsPage() {
       ) : (
         <div className="card">
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack">
               <thead>
                 <tr>
                   <th>Event</th>

@@ -350,7 +350,7 @@ function UsersPage() {
           <p className="empty-row">Noch keine Benutzer angelegt.</p>
         ) : (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack">
               <thead>
                 <tr>
                   <th>Name</th>

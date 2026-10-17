@@ -99,7 +99,7 @@ export default function CasesPage() {
       ) : (
         <div className="card">
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack">
               <thead>
                 <tr>
                   <th>Koffer</th>

@@ -133,7 +133,7 @@ export default function LocationsPage() {
       <section className="card" style={{ marginTop: 20 }}>
         <h2 className="section-title">Alle Lagerorte</h2>
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table--stack">
             <thead>
               <tr>
                 <th>Bezeichnung</th>

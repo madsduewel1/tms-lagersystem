@@ -81,6 +81,48 @@ export default function CalendarPage() {
     return map;
   }, [events]);
 
+  const agenda = useMemo(() => {
+    type Entry = { date: Date; time: string; title: string; kind: 'event' | 'appt'; path: string };
+    const items: Entry[] = [];
+    for (const ev of events) {
+      if (!ev.starts_at) continue;
+      const d = new Date(ev.starts_at);
+      if (d.getMonth() !== cursor.getMonth() || d.getFullYear() !== cursor.getFullYear()) continue;
+      items.push({
+        date: d,
+        time: d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
+        title: ev.name,
+        kind: 'event',
+        path: `/events/detail?id=${ev.id}`,
+      });
+    }
+    for (const a of appointments) {
+      const d = new Date(a.starts_at);
+      if (d.getMonth() !== cursor.getMonth() || d.getFullYear() !== cursor.getFullYear()) continue;
+      items.push({
+        date: d,
+        time: a.all_day
+          ? 'ganztägig'
+          : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
+        title: a.title,
+        kind: 'appt',
+        path: `/kalender/edit?id=${a.id}`,
+      });
+    }
+    items.sort((x, y) => x.date.getTime() - y.date.getTime());
+    const groups: Array<{ key: string; date: Date; items: Entry[] }> = [];
+    for (const it of items) {
+      const key = dayKey(it.date);
+      let group = groups.find((g) => g.key === key);
+      if (!group) {
+        group = { key, date: it.date, items: [] };
+        groups.push(group);
+      }
+      group.items.push(it);
+    }
+    return groups;
+  }, [appointments, events, cursor]);
+
   async function remove(appt: Appointment) {
     if (!window.confirm(`Termin „${appt.title}“ löschen?`)) return;
     try {
@@ -175,10 +217,45 @@ export default function CalendarPage() {
         </div>
       )}
 
+      {!loading && (
+        <div className="card calendar-agenda">
+          <h2 className="section-title">{monthLabel}</h2>
+          {agenda.length === 0 ? (
+            <p className="form-hint">Keine Termine in diesem Monat.</p>
+          ) : (
+            <ul className="agenda-list">
+              {agenda.map((group) => (
+                <li key={group.key} className="agenda-day">
+                  <div className="agenda-date">
+                    {group.date.toLocaleDateString('de-DE', {
+                      weekday: 'short',
+                      day: '2-digit',
+                      month: '2-digit',
+                    })}
+                  </div>
+                  {group.items.map((it, i) => (
+                    <button
+                      key={`${group.key}-${i}`}
+                      className="agenda-item"
+                      onClick={() => navigate(it.path)}
+                    >
+                      <span className={`agenda-dot ${it.kind === 'event' ? 'event' : ''}`} />
+                      <span className="agenda-time">{it.time}</span>
+                      <span className="agenda-title">{it.title}</span>
+                      <Icon name="chevron-right" size={16} />
+                    </button>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="card">
         <h2 className="section-title">Kommende Termine</h2>
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table--stack">
             <thead>
               <tr>
                 <th>Termin</th>

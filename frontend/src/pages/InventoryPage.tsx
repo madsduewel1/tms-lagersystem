@@ -162,7 +162,7 @@ export default function InventoryPage() {
       ) : (
         <div className="card">
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack">
               <thead>
                 <tr>
                   <th>Name</th>
