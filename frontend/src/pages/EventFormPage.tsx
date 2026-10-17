@@ -5,16 +5,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { PageHeader, Field, Alert, Loading } from '../components/ui';
 import { MultiSelect } from '../components/MultiSelect';
 import type { EventEditor, EventRow, EventStatus, UserOption } from '../types';
-import { eventStatusLabels } from '../utils/format';
+import { allowedEventTransitions, eventStatusLabels } from '../utils/format';
 
-const statuses: EventStatus[] = [
-  'entwurf',
-  'geplant',
-  'vorbereitung',
-  'aktiv',
-  'abgeschlossen',
-  'abgesagt',
-];
+const initialStatuses: EventStatus[] = ['entwurf', 'geplant', 'vorbereitung'];
 
 interface EventFormData {
   name: string;
@@ -58,6 +51,7 @@ export default function EventFormPage() {
   const editId = params.get('id');
 
   const [form, setForm] = useState<EventFormData>(empty);
+  const [originalStatus, setOriginalStatus] = useState<EventStatus>('entwurf');
   const [editorIds, setEditorIds] = useState<number[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [error, setError] = useState('');
@@ -72,6 +66,7 @@ export default function EventFormPage() {
       api<{ event: EventRow; editors: EventEditor[] }>(`/api/events/${Number(editId)}`)
         .then((data) => {
           setForm(toForm(data.event));
+          setOriginalStatus(data.event.status);
           setEditorIds(data.editors.map((e) => e.id));
           setCanManageEditors(
             user?.isAdmin || Number(data.event.created_by) === user?.id
@@ -130,6 +125,8 @@ export default function EventFormPage() {
   }
 
   if (loading) return <Loading />;
+
+  const statusOptions = isEdit ? allowedEventTransitions(originalStatus) : initialStatuses;
 
   return (
     <>
@@ -200,7 +197,7 @@ export default function EventFormPage() {
             value={form.status}
             onChange={(e) => set('status', e.target.value as EventStatus)}
           >
-            {statuses.map((s) => (
+            {statusOptions.map((s) => (
               <option key={s} value={s}>
                 {eventStatusLabels[s]}
               </option>

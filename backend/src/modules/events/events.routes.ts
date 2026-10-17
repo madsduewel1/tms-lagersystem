@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { PoolConnection } from 'mysql2/promise';
 import { pool, type SqlRow } from '../../db/pool.js';
 import { requireAuth, requireModule } from '../../middleware/auth.js';
 import { HttpError, validate } from '../../middleware/error.js';
 import { writeAudit } from '../audit/audit.service.js';
+import { checkoutEvent } from '../checkouts/checkouts.service.js';
 import { asyncHandler, parseId } from '../../utils/helpers.js';
 
 const eventSchema = z.object({
@@ -38,31 +40,33 @@ const planCaseSchema = z.object({
   note: z.string().max(512).nullish(),
 });
 
-async function setPlannedDevicesStatus(eventId: number, status: string): Promise<void> {
-  await pool.query(
-    `UPDATE items i
-     JOIN event_devices ed ON ed.item_id = i.id
-     SET i.status = ?, i.current_event_id = IF(? = 'verfuegbar', NULL, ed.event_id)
-     WHERE ed.event_id = ?`,
-    [status, status, eventId]
-  );
-}
+const EVENT_STATUSES = [
+  'entwurf',
+  'geplant',
+  'vorbereitung',
+  'aktiv',
+  'abgeschlossen',
+  'abgesagt',
+] as const;
+type EventStatus = (typeof EVENT_STATUSES)[number];
+
+// Erlaubte Statusübergänge – muss mit dem Frontend übereinstimmen.
+const EVENT_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
+  entwurf: ['geplant', 'vorbereitung', 'abgesagt'],
+  geplant: ['vorbereitung', 'abgesagt'],
+  vorbereitung: ['aktiv', 'abgesagt'],
+  aktiv: ['abgeschlossen', 'abgesagt'],
+  abgeschlossen: [],
+  abgesagt: [],
+};
 
 async function clearPlannedDevices(eventId: number): Promise<void> {
   await pool.query(
     `UPDATE items i
      JOIN event_devices ed ON ed.item_id = i.id
      SET i.status = 'verfuegbar', i.current_event_id = NULL
-     WHERE ed.event_id = ? AND i.current_event_id = ?`,
-    [eventId, eventId]
-  );
-}
-
-async function setPlannedCasesStatus(eventId: number, status: string): Promise<void> {
-  await pool.query(
-    `UPDATE cases c JOIN event_cases ec ON ec.case_id = c.id
-     SET c.status = ? WHERE ec.event_id = ?`,
-    [status, eventId]
+     WHERE ed.event_id = ?`,
+    [eventId]
   );
 }
 
@@ -114,6 +118,65 @@ async function canEditEvent(eventId: number, userId: number, isAdmin: boolean): 
   return isEditor(eventId, userId);
 }
 
+const CLOSED_EVENT_STATUSES = "('abgeschlossen','abgesagt')";
+
+// Ein Einzelgerät ist einzigartig: Wie viele Einheiten eines Artikels sind für
+// dieses Event noch planbar? Bestand minus bereits in anderen offenen Events
+// reservierter (noch nicht ausgegebener) Mengen.
+async function articleAvailable(itemId: number, eventId: number): Promise<number> {
+  const [rows] = await pool.query<SqlRow<{ stock: number; reserved: number }>[]>(
+    `SELECT i.quantity AS stock,
+       COALESCE((SELECT SUM(ei.quantity) FROM event_items ei
+                 JOIN events e ON e.id = ei.event_id
+                 WHERE ei.item_id = i.id AND ei.event_id <> ?
+                   AND ei.status = 'geplant'
+                   AND e.status NOT IN ${CLOSED_EVENT_STATUSES}), 0) AS reserved
+     FROM items i WHERE i.id = ?`,
+    [eventId, itemId]
+  );
+  const row = rows[0];
+  if (!row) return 0;
+  return Math.max(0, Number(row.stock) - Number(row.reserved));
+}
+
+async function articlePlanIssue(
+  itemId: number,
+  eventId: number,
+  quantity: number
+): Promise<string | null> {
+  const available = await articleAvailable(itemId, eventId);
+  if (quantity > available) {
+    return `nur ${available} verfügbar`;
+  }
+  return null;
+}
+
+// Darf dieses Einzelgerät für das Event geplant werden? Bereits in diesem Event
+// eingeplante Geräte dürfen erneut gesetzt (aktualisiert) werden. Andernfalls
+// muss es verfügbar und darf in keinem anderen offenen Event gebucht sein.
+async function devicePlanIssue(itemId: number, eventId: number): Promise<string | null> {
+  const [rows] = await pool.query<SqlRow<{ status: string; other: number; mine: number }>[]>(
+    `SELECT i.status,
+       (SELECT COUNT(*) FROM event_devices ed
+          JOIN events e ON e.id = ed.event_id
+         WHERE ed.item_id = i.id AND ed.event_id <> ?
+           AND e.status NOT IN ${CLOSED_EVENT_STATUSES}) AS other,
+       (SELECT COUNT(*) FROM event_devices ed
+         WHERE ed.item_id = i.id AND ed.event_id = ?) AS mine
+     FROM items i WHERE i.id = ?`,
+    [eventId, eventId, itemId]
+  );
+  const row = rows[0];
+  if (!row) return 'nicht gefunden';
+  if (Number(row.other) > 0) {
+    return 'bereits in einem anderen Event eingeplant';
+  }
+  if (Number(row.mine) === 0 && row.status !== 'verfuegbar') {
+    return `nicht verfügbar (Status: ${row.status})`;
+  }
+  return null;
+}
+
 async function replaceEditors(eventId: number, userIds: number[]): Promise<void> {
   await pool.query('DELETE FROM event_editors WHERE event_id = ?', [eventId]);
   if (userIds.length === 0) return;
@@ -146,7 +209,7 @@ eventsRouter.get(
     const [rows] = await pool.query(
       `SELECT e.*, u.name AS created_by_name,
         (SELECT COUNT(*) FROM event_items ei WHERE ei.event_id = e.id) AS item_plan_count,
-        (SELECT COALESCE(SUM(ed.quantity), 0) FROM event_devices ed WHERE ed.event_id = e.id) AS device_plan_count,
+        (SELECT COUNT(*) FROM event_devices ed WHERE ed.event_id = e.id) AS device_plan_count,
         (SELECT COUNT(*) FROM event_cases ec WHERE ec.event_id = e.id) AS case_plan_count,
         (SELECT COUNT(*) FROM checkouts c WHERE c.event_id = e.id AND c.status = 'offen') AS open_checkouts,
         (SELECT COUNT(*) FROM event_editors ee WHERE ee.event_id = e.id AND ee.user_id = ?) AS user_editor_count
@@ -174,6 +237,10 @@ eventsRouter.post(
   validate(eventSchema),
   asyncHandler(async (req, res) => {
     const b = req.body as Record<string, unknown>;
+    const createStatus = (b.status as EventStatus | undefined) ?? 'entwurf';
+    if (!['entwurf', 'geplant', 'vorbereitung'].includes(createStatus)) {
+      throw new HttpError(400, 'Ein Event kann nur als Entwurf, Geplant oder Vorbereitung angelegt werden');
+    }
     const [result] = await pool.query(
       `INSERT INTO events (name, description, location, contact_name, starts_at, ends_at, status, notes, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -184,7 +251,7 @@ eventsRouter.post(
         b.contact_name ?? null,
         b.starts_at ?? null,
         b.ends_at ?? null,
-        b.status ?? 'entwurf',
+        createStatus,
         b.notes ?? null,
         req.user!.id,
       ]
@@ -271,6 +338,33 @@ eventsRouter.patch(
     const id = parseId(req.params.id);
     await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const b = req.body as Record<string, unknown>;
+
+    const current = await loadEvent(id);
+    if (!current) throw new HttpError(404, 'Event nicht gefunden');
+    const currentStatus = current.status as EventStatus;
+    const newStatus = b.status as EventStatus | undefined;
+    if (newStatus !== undefined && newStatus !== currentStatus) {
+      const allowedFrom = EVENT_TRANSITIONS[currentStatus] ?? [];
+      if (!allowedFrom.includes(newStatus)) {
+        throw new HttpError(
+          400,
+          `Statuswechsel von "${currentStatus}" nach "${newStatus}" ist nicht erlaubt`
+        );
+      }
+      if (newStatus === 'abgeschlossen' || newStatus === 'abgesagt') {
+        const [open] = await pool.query<SqlRow<{ n: number }>[]>(
+          `SELECT COUNT(*) AS n FROM checkouts WHERE event_id = ? AND status = 'offen'`,
+          [id]
+        );
+        if ((open[0]?.n ?? 0) > 0) {
+          throw new HttpError(
+            409,
+            'Es sind noch offene Ausgaben vorhanden. Bitte zuerst alles zurückbuchen.'
+          );
+        }
+      }
+    }
+
     const allowed = [
       'name',
       'description',
@@ -294,20 +388,35 @@ eventsRouter.patch(
       await pool.query(`UPDATE events SET ${fields.join(', ')} WHERE id = ?`, values);
     }
 
-    const newStatus = (b as { status?: string }).status;
-    if (newStatus === 'aktiv') {
-      await setPlannedDevicesStatus(id, 'ausgelagert');
-      await setPlannedCasesStatus(id, 'ausgelagert');
-    } else if (newStatus === 'abgeschlossen' || newStatus === 'abgesagt') {
-      await clearPlannedDevices(id);
-      await clearPlannedCases(id);
+    if (newStatus !== undefined && newStatus !== currentStatus) {
+      if (newStatus === 'aktiv') {
+        const conn = await pool.getConnection();
+        try {
+          await conn.beginTransaction();
+          await checkoutEvent(conn, id, req.user!.id);
+          await conn.query(
+            `UPDATE cases c JOIN event_cases ec ON ec.case_id = c.id
+             SET c.status = 'ausgelagert' WHERE ec.event_id = ?`,
+            [id]
+          );
+          await conn.commit();
+        } catch (err) {
+          await conn.rollback();
+          throw err;
+        } finally {
+          conn.release();
+        }
+      } else if (newStatus === 'abgeschlossen' || newStatus === 'abgesagt') {
+        await clearPlannedDevices(id);
+        await clearPlannedCases(id);
+      }
     }
 
     const editorIds = b.editorIds as number[] | undefined;
     if (editorIds !== undefined) {
       const isAdmin = req.user!.isAdmin;
-      const cur = await loadEvent(id);
-      const isCreator = !!cur && typeof cur.created_by === 'number' && cur.created_by === req.user!.id;
+      const isCreator =
+        typeof current.created_by === 'number' && current.created_by === req.user!.id;
       if (!isAdmin && !isCreator) {
         throw new HttpError(403, 'Nur Ersteller oder Admins dürfen die Bearbeitungsrechte ändern');
       }
@@ -365,6 +474,10 @@ eventsRouter.post(
     if (items[0].kind !== 'artikel') {
       throw new HttpError(400, 'Für Einzelgeräte bitte die Geräteplanung verwenden');
     }
+    const issue = await articlePlanIssue(item_id, id, quantity);
+    if (issue) {
+      throw new HttpError(400, `Artikel kann nicht eingeplant werden: ${issue}`);
+    }
     await pool.query(
       `INSERT INTO event_items (event_id, item_id, quantity, note) VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), note = VALUES(note)`,
@@ -412,10 +525,17 @@ eventsRouter.post(
     if (items[0].kind !== 'geraet') {
       throw new HttpError(400, 'Für Mengenartikel bitte die Mengenplanung verwenden');
     }
+    if (quantity !== 1) {
+      throw new HttpError(400, 'Ein Einzelgerät kann nur mit Stückzahl 1 eingeplant werden');
+    }
+    const issue = await devicePlanIssue(item_id, id);
+    if (issue) {
+      throw new HttpError(409, `Gerät kann nicht eingeplant werden: ${issue}`);
+    }
     await pool.query(
-      `INSERT INTO event_devices (event_id, item_id, quantity, note) VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), note = VALUES(note)`,
-      [id, item_id, quantity, note ?? null]
+      `INSERT INTO event_devices (event_id, item_id, quantity, note) VALUES (?, ?, 1, ?)
+       ON DUPLICATE KEY UPDATE quantity = 1, note = VALUES(note)`,
+      [id, item_id, note ?? null]
     );
     const [evStatus] = await pool.query<SqlRow<{ status: string }>[]>(
       'SELECT status FROM events WHERE id = ?',
@@ -460,9 +580,12 @@ eventsRouter.patch(
     const itemId = parseId(req.params.itemId, 'Geräte-ID');
     await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     const { quantity } = req.body as { quantity: number };
+    if (quantity !== 1) {
+      throw new HttpError(400, 'Ein Einzelgerät kann nur mit Stückzahl 1 eingeplant werden');
+    }
     const [result] = await pool.query(
-      'UPDATE event_devices SET quantity = ? WHERE event_id = ? AND item_id = ?',
-      [quantity, id, itemId]
+      'UPDATE event_devices SET quantity = 1 WHERE event_id = ? AND item_id = ?',
+      [id, itemId]
     );
     if ((result as { affectedRows: number }).affectedRows === 0) {
       const [check] = await pool.query<SqlRow<{ n: number }>[]>(
@@ -485,33 +608,44 @@ eventsRouter.patch(
   })
 );
 
-async function planCaseAssets(eventId: number, caseId: number): Promise<void> {
-  const [assets] = await pool.query<SqlRow<{ item_id: number; quantity: number; note: string | null; kind: string }>[]>(
+async function planCaseAssets(
+  eventId: number,
+  caseId: number,
+  conn: PoolConnection
+): Promise<void> {
+  const [assetRows] = await conn.query(
     `SELECT ci.item_id, ci.quantity, ci.note, i.kind
      FROM case_items ci JOIN items i ON i.id = ci.item_id
      WHERE ci.case_id = ?`,
     [caseId]
   );
-  const [evStatus] = await pool.query<SqlRow<{ status: string }>[]>(
-    'SELECT status FROM events WHERE id = ?',
-    [eventId]
-  );
-  const markCurrent = !!evStatus[0] && evStatus[0].status !== 'abgeschlossen' && evStatus[0].status !== 'abgesagt';
-  for (const asset of assets) {
+  const [statusRows] = await conn.query('SELECT status FROM events WHERE id = ?', [eventId]);
+  const status = (statusRows as Array<{ status: string }>)[0]?.status;
+  const markCurrent = !!status && status !== 'abgeschlossen' && status !== 'abgesagt';
+  for (const asset of assetRows as Array<{
+    item_id: number;
+    quantity: number;
+    note: string | null;
+    kind: string;
+  }>) {
     if (asset.kind === 'geraet') {
-      await pool.query(
-        `INSERT INTO event_devices (event_id, item_id, note) VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE note = VALUES(note)`,
-        [eventId, asset.item_id, asset.note ?? null]
+      await conn.query(
+        `INSERT INTO event_devices (event_id, item_id, quantity, note, source_case_id)
+         VALUES (?, ?, 1, ?, ?)
+         ON DUPLICATE KEY UPDATE quantity = 1, note = VALUES(note),
+           source_case_id = COALESCE(source_case_id, VALUES(source_case_id))`,
+        [eventId, asset.item_id, asset.note ?? null, caseId]
       );
       if (markCurrent) {
-        await pool.query('UPDATE items SET current_event_id = ? WHERE id = ?', [eventId, asset.item_id]);
+        await conn.query('UPDATE items SET current_event_id = ? WHERE id = ?', [eventId, asset.item_id]);
       }
     } else {
-      await pool.query(
-        `INSERT INTO event_items (event_id, item_id, quantity, note) VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), note = VALUES(note)`,
-        [eventId, asset.item_id, asset.quantity, asset.note ?? null]
+      await conn.query(
+        `INSERT INTO event_items (event_id, item_id, quantity, note, source_case_id)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), note = VALUES(note),
+           source_case_id = COALESCE(source_case_id, VALUES(source_case_id))`,
+        [eventId, asset.item_id, asset.quantity, asset.note ?? null, caseId]
       );
     }
   }
@@ -529,12 +663,41 @@ eventsRouter.post(
       [case_id]
     );
     if (cases.length === 0) throw new HttpError(404, 'Case nicht gefunden');
-    await pool.query(
-      `INSERT INTO event_cases (event_id, case_id, note) VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE note = VALUES(note)`,
-      [id, case_id, note ?? null]
+    const [assets] = await pool.query<
+      SqlRow<{ item_id: number; quantity: number; kind: string; name: string }>[]
+    >(
+      `SELECT ci.item_id, ci.quantity, i.kind, i.name
+       FROM case_items ci JOIN items i ON i.id = ci.item_id
+       WHERE ci.case_id = ?`,
+      [case_id]
     );
-    await planCaseAssets(id, case_id);
+    const problems: string[] = [];
+    for (const asset of assets) {
+      const issue =
+        asset.kind === 'geraet'
+          ? await devicePlanIssue(asset.item_id, id)
+          : await articlePlanIssue(asset.item_id, id, asset.quantity);
+      if (issue) problems.push(`${asset.name}: ${issue}`);
+    }
+    if (problems.length) {
+      throw new HttpError(409, `Koffer kann nicht eingeplant werden – ${problems.join('; ')}`);
+    }
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query(
+        `INSERT INTO event_cases (event_id, case_id, note) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE note = VALUES(note)`,
+        [id, case_id, note ?? null]
+      );
+      await planCaseAssets(id, case_id, conn);
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
     await writeAudit({
       userId: req.user!.id,
       action: 'event_case_planned',
@@ -554,6 +717,42 @@ eventsRouter.delete(
     const caseId = parseId(req.params.caseId, 'Case-ID');
     await requireEventPermission(id, req.user!.id, req.user!.isAdmin);
     await pool.query('DELETE FROM event_cases WHERE event_id = ? AND case_id = ?', [id, caseId]);
+
+    // Aus diesem Koffer stammende, noch nicht ausgegebene Assets zurücknehmen,
+    // sofern sie nicht von einem anderen noch eingeplanten Koffer benötigt werden.
+    const [deviceRows] = await pool.query<SqlRow<{ item_id: number }>[]>(
+      `SELECT ed.item_id FROM event_devices ed
+       WHERE ed.event_id = ? AND ed.source_case_id IS NOT NULL AND ed.status = 'geplant'
+         AND NOT EXISTS (
+           SELECT 1 FROM event_cases ec
+           JOIN case_items ci ON ci.case_id = ec.case_id
+           WHERE ec.event_id = ? AND ci.item_id = ed.item_id
+         )`,
+      [id, id]
+    );
+    const deviceIds = deviceRows.map((r) => r.item_id);
+    if (deviceIds.length) {
+      await pool.query('DELETE FROM event_devices WHERE event_id = ? AND item_id IN (?)', [
+        id,
+        deviceIds,
+      ]);
+      await pool.query(
+        `UPDATE items SET status = 'verfuegbar', current_event_id = NULL
+         WHERE id IN (?) AND current_event_id = ?`,
+        [deviceIds, id]
+      );
+    }
+    await pool.query(
+      `DELETE ei FROM event_items ei
+       WHERE ei.event_id = ? AND ei.source_case_id IS NOT NULL AND ei.status = 'geplant'
+         AND NOT EXISTS (
+           SELECT 1 FROM event_cases ec
+           JOIN case_items ci ON ci.case_id = ec.case_id
+           WHERE ec.event_id = ? AND ci.item_id = ei.item_id
+         )`,
+      [id, id]
+    );
+
     res.json({ ok: true, event: await loadEvent(id) });
   })
 );

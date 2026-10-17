@@ -43,6 +43,20 @@ export const eventStatusLabels: Record<EventStatus, string> = {
   abgesagt: 'Abgesagt',
 };
 
+// Erlaubte Statusübergänge – muss mit dem Backend übereinstimmen.
+export const eventTransitions: Record<EventStatus, EventStatus[]> = {
+  entwurf: ['geplant', 'vorbereitung', 'abgesagt'],
+  geplant: ['vorbereitung', 'abgesagt'],
+  vorbereitung: ['aktiv', 'abgesagt'],
+  aktiv: ['abgeschlossen', 'abgesagt'],
+  abgeschlossen: [],
+  abgesagt: [],
+};
+
+export function allowedEventTransitions(current: EventStatus): EventStatus[] {
+  return [current, ...(eventTransitions[current] ?? [])];
+}
+
 export const maintenanceStatusLabels: Record<MaintenanceStatus, string> = {
   gemeldet: 'Gemeldet',
   pruefung: 'In Prüfung',

@@ -6,22 +6,7 @@ import { Icon } from '../components/Icon';
 import { NotFound } from '../components/NotFound';
 import QrScannerModal from '../components/QrScannerModal';
 import type { EventEditor, EventPlanCase, EventPlanDevice, EventPlanItem, EventRow, EventStatus, Item, ResolvedQr } from '../types';
-import { eventStatusLabels, formatDateTime } from '../utils/format';
-
-function allowedTransitions(current: EventStatus): EventStatus[] {
-  switch (current) {
-    case 'entwurf':
-      return ['geplant', 'vorbereitung', 'abgesagt'];
-    case 'geplant':
-      return ['vorbereitung', 'abgesagt'];
-    case 'vorbereitung':
-      return ['aktiv', 'abgesagt'];
-    case 'aktiv':
-      return ['abgeschlossen', 'abgesagt'];
-    default:
-      return [];
-  }
-}
+import { allowedEventTransitions, eventStatusLabels, formatDateTime } from '../utils/format';
 
 interface EventDetail {
   event: EventRow;
@@ -46,15 +31,12 @@ export default function EventDetailPage() {
 
   const [deviceModal, setDeviceModal] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState('');
-  const [deviceQty, setDeviceQty] = useState('1');
   const [itemModal, setItemModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState('');
   const [itemQty, setItemQty] = useState('1');
   const [caseModal, setCaseModal] = useState(false);
   const [selectedCase, setSelectedCase] = useState('');
   const [allCases, setAllCases] = useState<EventPlanCase[]>([]);
-  const [deviceQtyDrafts, setDeviceQtyDrafts] = useState<Record<number, string>>({});
-  const [deviceQtyBusy, setDeviceQtyBusy] = useState<number | null>(null);
 
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanInput, setScanInput] = useState('');
@@ -102,14 +84,25 @@ export default function EventDetailPage() {
   );
 
   const freeDevices = useMemo(
-    () => devices.filter((d) => !assignedDeviceIds.has(d.id)),
+    () =>
+      devices.filter(
+        (d) =>
+          !assignedDeviceIds.has(d.id) &&
+          d.status === 'verfuegbar' &&
+          d.current_event_id == null
+      ),
     [devices, assignedDeviceIds]
   );
 
   const freeItems = useMemo(
-    () => items.filter((d) => !assignedItemIds.has(d.id)),
+    () => items.filter((d) => !assignedItemIds.has(d.id) && d.quantity > 0),
     [items, assignedItemIds]
   );
+
+  const selectedItemStock = useMemo(() => {
+    const found = items.find((d) => String(d.id) === selectedItem);
+    return found ? found.quantity : 0;
+  }, [items, selectedItem]);
 
   const freeCases = useMemo(
     () => allCases.filter((d) => !assignedCaseIds.has(d.id)),
@@ -137,39 +130,14 @@ export default function EventDetailPage() {
         method: 'POST',
         body: JSON.stringify({
           item_id: Number(selectedDevice),
-          quantity: Math.max(1, Number(deviceQty) || 1),
+          quantity: 1,
         }),
       });
       setDeviceModal(false);
       setSelectedDevice('');
-      setDeviceQty('1');
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Hinzufügen fehlgeschlagen');
-    }
-  }
-
-  async function saveDeviceQty(itemId: number) {
-    const raw = deviceQtyDrafts[itemId];
-    if (raw === undefined) return;
-    const qty = Math.max(1, Number(raw) || 1);
-    setError('');
-    setDeviceQtyBusy(itemId);
-    try {
-      await api(`/api/events/${eventId}/devices/${itemId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ quantity: qty }),
-      });
-      setDeviceQtyDrafts((prev) => {
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-      await load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Stückzahl konnte nicht gespeichert werden');
-    } finally {
-      setDeviceQtyBusy(null);
     }
   }
 
@@ -185,13 +153,18 @@ export default function EventDetailPage() {
 
   async function addItem() {
     if (!selectedItem) return;
+    const qty = Math.max(1, Number(itemQty) || 1);
+    if (qty > selectedItemStock) {
+      setError(`Es sind nur ${selectedItemStock} verfügbar.`);
+      return;
+    }
     setError('');
     try {
       await api(`/api/events/${eventId}/items`, {
         method: 'POST',
         body: JSON.stringify({
           item_id: Number(selectedItem),
-          quantity: Math.max(1, Number(itemQty) || 1),
+          quantity: qty,
         }),
       });
       setItemModal(false);
@@ -332,7 +305,7 @@ export default function EventDetailPage() {
 
   const { event: ev } = data;
   const canEdit = data.can_edit;
-  const transitions = allowedTransitions(ev.status);
+  const transitions = allowedEventTransitions(ev.status);
 
   return (
     <>
@@ -444,7 +417,6 @@ export default function EventDetailPage() {
                   <tr>
                     <th>Gerät</th>
                     <th>Inventarnummer</th>
-                    <th>Stückzahl</th>
                     <th>Kategorie</th>
                     <th>Status</th>
                     <th>Notiz</th>
@@ -461,39 +433,6 @@ export default function EventDetailPage() {
                         </Link>
                       </td>
                       <td className="mono">{d.inventory_number ?? '–'}</td>
-                      <td>
-                        {canEdit ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <input
-                              className="form-input qty-input"
-                              type="number"
-                              min={1}
-                              value={deviceQtyDrafts[d.item_id] ?? String(d.quantity)}
-                              onChange={(e) =>
-                                setDeviceQtyDrafts((prev) => ({
-                                  ...prev,
-                                  [d.item_id]: e.target.value,
-                                }))
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') void saveDeviceQty(d.item_id);
-                              }}
-                            />
-                            {(deviceQtyDrafts[d.item_id] !== undefined ||
-                              deviceQtyBusy === d.item_id) && (
-                              <button
-                                className="btn btn-sm"
-                                disabled={deviceQtyBusy === d.item_id}
-                                onClick={() => void saveDeviceQty(d.item_id)}
-                              >
-                                <Icon name="check" size={14} />
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          d.quantity
-                        )}
-                      </td>
                       <td>{d.category_name ?? '–'}</td>
                       <td>
                         <Badge tone={d.status === 'abgeschlossen' ? 'success' : 'accent'}>
@@ -536,14 +475,6 @@ export default function EventDetailPage() {
                     </option>
                   ))}
                 </select>
-                <input
-                  className="form-input qty-input"
-                  type="number"
-                  min={1}
-                  title="Stückzahl (Bedarf)"
-                  value={deviceQty}
-                  onChange={(e) => setDeviceQty(e.target.value)}
-                />
                 <button
                   className="btn btn-primary btn-sm"
                   disabled={!selectedDevice}
@@ -557,7 +488,6 @@ export default function EventDetailPage() {
                   onClick={() => {
                     setDeviceModal(false);
                     setSelectedDevice('');
-                    setDeviceQty('1');
                   }}
                 >
                   Abbrechen
@@ -641,10 +571,16 @@ export default function EventDetailPage() {
                 className="form-input qty-input"
                 type="number"
                 min={1}
-                title="Menge"
+                max={selectedItemStock || undefined}
+                title={selectedItem ? `Maximal ${selectedItemStock} verfügbar` : 'Menge'}
                 value={itemQty}
                 onChange={(e) => setItemQty(e.target.value)}
               />
+              {selectedItem && (
+                <span className="muted" style={{ whiteSpace: 'nowrap' }}>
+                  max. {selectedItemStock}
+                </span>
+              )}
               <button
                 className="btn btn-primary btn-sm"
                 disabled={!selectedItem}

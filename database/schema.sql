@@ -312,6 +312,7 @@ CREATE TABLE IF NOT EXISTS event_items (
   quantity INT NOT NULL DEFAULT 1,
   status ENUM('geplant','ausgegeben','zurueck') NOT NULL DEFAULT 'geplant',
   note VARCHAR(512) NULL,
+  source_case_id INT UNSIGNED NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_event_items (event_id, item_id),
   CONSTRAINT fk_event_items_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
@@ -319,6 +320,7 @@ CREATE TABLE IF NOT EXISTS event_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- geplante Einzelgeräte
+-- Hinweis: quantity ist für Einzelgeräte immer 1 (Geräte sind eindeutig).
 CREATE TABLE IF NOT EXISTS event_devices (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   event_id INT UNSIGNED NOT NULL,
@@ -326,6 +328,7 @@ CREATE TABLE IF NOT EXISTS event_devices (
   status ENUM('geplant','ausgegeben','zurueck') NOT NULL DEFAULT 'geplant',
   quantity INT NOT NULL DEFAULT 1,
   note VARCHAR(512) NULL,
+  source_case_id INT UNSIGNED NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_event_devices (event_id, item_id),
   CONSTRAINT fk_event_devices_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
