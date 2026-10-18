@@ -380,9 +380,9 @@ export async function generateLabelsPdf(
     gapY = layout.gapY;
   }
 
-  // Logo laden
-  const { resolveBrandingLogo } = await import('../../utils/branding.js');
-  const logoPath = await resolveBrandingLogo();
+  // Logo laden – Etiketten nutzen immer das Label-PNG
+  const { resolveLabelLogo } = await import('../../utils/branding.js');
+  const logoPath = resolveLabelLogo();
   let logoBuf: Buffer | null = null;
   if (logoPath) {
     try {

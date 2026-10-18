@@ -21,7 +21,25 @@ const LOGO_FILENAMES = [
 ];
 
 /**
- * Ermittelt den Pfad zu einem verwendbaren Logo für Labels/PDF.
+ * Ermittelt das fest im Repo liegende Logo (assets/branding, dann Frontend-Public).
+ * Das Label-PNG steht bewusst an erster Stelle.
+ */
+function resolveStaticLogo(): string | null {
+  if (fs.existsSync(BRANDING_DIR)) {
+    for (const name of LOGO_FILENAMES) {
+      const candidate = path.join(BRANDING_DIR, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+
+  const publicLogo = path.join(APP_ROOT, 'frontend', 'public', 'tms-logo.png');
+  if (fs.existsSync(publicLogo)) return publicLogo;
+
+  return null;
+}
+
+/**
+ * Ermittelt den Pfad zu einem verwendbaren Logo für Label/PDF.
  * Reihenfolge: hochgeladenes Logo (uploads) > assets/branding > Frontend-Public-Logo.
  */
 export async function resolveBrandingLogo(): Promise<string | null> {
@@ -41,17 +59,18 @@ export async function resolveBrandingLogo(): Promise<string | null> {
     // settings-Tabelle ggf. noch nicht vorhanden
   }
 
-  if (fs.existsSync(BRANDING_DIR)) {
-    for (const name of LOGO_FILENAMES) {
-      const candidate = path.join(BRANDING_DIR, name);
-      if (fs.existsSync(candidate)) return candidate;
-    }
-  }
+  return resolveStaticLogo();
+}
 
-  const publicLogo = path.join(APP_ROOT, 'frontend', 'public', 'tms-logo.png');
-  if (fs.existsSync(publicLogo)) return publicLogo;
-
-  return null;
+/**
+ * Logo ausschließlich für Etiketten: nutzt immer das Label-PNG aus
+ * `assets/branding`, unabhängig von einem in den Einstellungen hochgeladenen
+ * Logo. Ein hochgeladenes Logo gilt damit nur für Login/Anmeldeseite.
+ */
+export function resolveLabelLogo(): string | null {
+  const labelLogo = path.join(BRANDING_DIR, 'tms-logo-label.png');
+  if (fs.existsSync(labelLogo)) return labelLogo;
+  return resolveStaticLogo();
 }
 
 export { BRANDING_DIR };
