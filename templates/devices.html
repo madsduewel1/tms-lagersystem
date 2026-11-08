@@ -149,7 +149,7 @@
     {% if group_by != 'none' %}<h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 pt-3">{{ section_name }}</h2>{% endif %}
     {% for product_group in product_groups %}
     {% set exemplar = product_group.devices[0] %}
-    <details class="group glass-effect rounded-xl sm:rounded-2xl border border-gray-800 overflow-hidden" open>
+    <details class="group glass-effect rounded-xl sm:rounded-2xl border border-gray-800 overflow-hidden">
         <summary class="p-4 sm:p-5 cursor-pointer list-none">
             <div class="flex items-start gap-3">
                 {% if exemplar[20] %}<img src="{{ url_for('device_image', device_id=exemplar[0]) }}" alt="" class="w-12 h-12 rounded-lg object-cover border border-gray-700 flex-shrink-0">{% endif %}
