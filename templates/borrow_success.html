@@ -34,7 +34,7 @@
 
     <div class="bg-gray-800 p-6 rounded-lg mb-6 text-center">
         <h3 class="text-lg font-semibold mb-4">Ausleihe-Dokument:</h3>
-        <a href="/borrow_pdf/{{ borrow.ausleih_id }}" target="_blank" 
+        <a href="{{ base_path }}/borrow_pdf/{{ borrow.ausleih_id }}" target="_blank" 
            class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded font-semibold transition inline-block">
             <i class="fas fa-file-pdf mr-2"></i>PDF herunterladen
         </a>
@@ -42,10 +42,10 @@
     </div>
 
     <div class="text-center space-x-4">
-        <a href="/borrow" class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded font-semibold transition inline-block">
+        <a href="{{ base_path }}/borrow" class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded font-semibold transition inline-block">
             <i class="fas fa-plus mr-2"></i>Weitere Ausleihe
         </a>
-        <a href="/lager/{{ session.current_lager }}" class="bg-gray-600 hover:bg-gray-700 px-6 py-3 rounded font-semibold transition inline-block">
+        <a href="{{ base_path }}/lager/{{ session.current_lager }}" class="bg-gray-600 hover:bg-gray-700 px-6 py-3 rounded font-semibold transition inline-block">
             <i class="fas fa-arrow-left mr-2"></i>Zurück zum Lager
         </a>
     </div>

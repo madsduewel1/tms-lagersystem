@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="w-full">
+    <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl font-semibold">
+                <i class="fas fa-toolbox mr-2 text-pink-400"></i>Cases
+            </h1>
+            <p class="text-sm text-gray-500 mt-1">
+                {{ cases|length }} Cases · {{ assigned_devices }} von {{ total_devices }} Geräten zugewiesen
+            </p>
+        </div>
+        <a href="{{ base_path }}/devices" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+            <i class="fas fa-box mr-2"></i>Zu den Geräten
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <!-- Neuer Case -->
+        <div class="xl:col-span-1">
+            <form method="POST" action="{{ url_for('create_case') }}" class="bg-gray-900 border border-gray-800 p-6 rounded-xl">
+                <h2 class="text-sm font-medium mb-4">Neuen Case anlegen</h2>
+
+                <label class="block text-xs text-gray-400 mb-2" for="case_name">Name</label>
+                <input type="text" id="case_name" name="name" placeholder="z. B. Mikrofonkoffer"
+                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3" required>
+
+                <label class="block text-xs text-gray-400 mb-2" for="case_barcode">Barcode (optional)</label>
+                <input type="text" id="case_barcode" name="barcode" placeholder="Automatisch, wenn leer"
+                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+
+                <label class="block text-xs text-gray-400 mb-2" for="case_lagerplatz">Lagerplatz</label>
+                <input type="text" id="case_lagerplatz" name="lagerplatz" placeholder="z. B. Regal A"
+                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+
+                <label class="block text-xs text-gray-400 mb-2" for="case_lagerort">Lagerort / Raum</label>
+                <input type="text" id="case_lagerort" name="lagerort" placeholder="z. B. Raum 102"
+                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+
+                <label class="block text-xs text-gray-400 mb-2" for="case_type">Typ</label>
+                <select id="case_type" name="case_type"
+                        class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+                    {% for type in case_types %}<option value="{{ type }}">{{ type }}</option>{% endfor %}
+                </select>
+
+                <label class="block text-xs text-gray-400 mb-2" for="case_status">Status</label>
+                <select id="case_status" name="status"
+                        class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+                    <option value="verfügbar">Verfügbar</option>
+                    <option value="defekt">Defekt</option>
+                    <option value="ausgeliehen">Ausgeliehen</option>
+                    <option value="zugewiesen">Zugewiesen</option>
+                </select>
+
+                <label class="block text-xs text-gray-400 mb-2" for="case_beschreibung">Beschreibung</label>
+                <textarea id="case_beschreibung" name="beschreibung" rows="2" placeholder="Optional"
+                          class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-4"></textarea>
+
+                <button type="submit" class="w-full bg-pink-600 hover:bg-pink-700 p-3 rounded-lg font-medium transition">
+                    <i class="fas fa-plus mr-2"></i>Case anlegen
+                </button>
+            </form>
+        </div>
+
+        <!-- Case-Liste -->
+        <div class="xl:col-span-2">
+            <form method="GET" action="{{ url_for('cases') }}" class="flex flex-wrap gap-2 mb-4">
+                <div class="relative flex-1 min-w-[220px]">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm"></i>
+                    <input type="text" name="search" value="{{ search }}" placeholder="Cases durchsuchen (Name, Barcode, Typ…)"
+                           class="w-full pl-9 pr-3 py-2.5 bg-gray-900 border border-gray-800 rounded-lg text-sm focus:border-pink-500 focus:outline-none">
+                </div>
+                <button type="submit" class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                    Suchen
+                </button>
+                {% if search %}
+                <a href="{{ url_for('cases') }}" class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-300">
+                    <i class="fas fa-times mr-1"></i>Zurücksetzen
+                </a>
+                {% endif %}
+            </form>
+            {% if cases %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {% for case in cases %}
+                <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <a href="{{ base_path }}/cases/{{ case[0] }}" class="font-medium text-gray-100 hover:text-pink-300 truncate block">
+                                <i class="fas fa-toolbox text-pink-400 mr-2"></i>{{ case[1] }}
+                            </a>
+                            <p class="text-xs text-gray-500 mt-1 font-mono">{{ case[2] }}</p>
+                            <span class="inline-flex items-center gap-1 mt-2 mr-1 px-2 py-0.5 rounded-full text-xs bg-gray-800 text-gray-400">
+                                <i class="fas fa-box"></i>{{ case[9] or 'Case' }}
+                            </span>
+                            <span class="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-xs
+                                {% if case[8] == 'verfügbar' %}bg-emerald-500/10 text-emerald-400
+                                {% elif case[8] == 'defekt' %}bg-red-500/10 text-red-400
+                                {% elif case[8] == 'zugewiesen' %}bg-purple-500/10 text-purple-300
+                                {% else %}bg-yellow-500/10 text-yellow-400{% endif %}">
+                                {% if case[8] == 'verfügbar' %}<i class="fas fa-check-circle"></i>
+                                {% elif case[8] == 'defekt' %}<i class="fas fa-exclamation-triangle"></i>
+                                {% elif case[8] == 'zugewiesen' %}<i class="fas fa-calendar-check"></i>
+                                {% else %}<i class="fas fa-hand-holding"></i>{% endif %}
+                                {{ case[8] or 'verfügbar' }}
+                            </span>
+                        </div>
+                        <form method="POST" action="{{ url_for('delete_case', case_id=case[0]) }}"
+                              onsubmit="return confirm('Case wirklich löschen? Die Geräte bleiben erhalten.')">
+                            <button type="submit" class="text-gray-500 hover:text-red-400" title="Löschen">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </form>
+                    </div>
+
+                    <p class="text-sm text-gray-400 mt-3">
+                        {{ case[7] }} Gerät{% if case[7] != 1 %}e{% endif %}
+                        {% if case[6] %}<span class="text-xs text-gray-500">· {{ case[6] }} Position{% if case[6] != 1 %}en{% endif %}</span>{% endif %}
+                    </p>
+                    {% if case[4] %}
+                    <p class="text-xs text-gray-500 mt-1">Lagerplatz: {{ case[4] }}</p>
+                    {% endif %}
+                    {% if case[5] %}<p class="text-xs text-gray-500 mt-1">Lagerort: {{ case[5] }}</p>{% endif %}
+                    {% if case[3] %}
+                    <p class="text-xs text-gray-500 mt-1">{{ case[3] }}</p>
+                    {% endif %}
+
+                    <a href="{{ base_path }}/cases/{{ case[0] }}" class="mt-4 inline-flex items-center justify-center px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                        <i class="fas fa-boxes-stacked mr-2"></i>Geräte zuweisen
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="bg-gray-900 border border-gray-800 p-8 rounded-xl text-center text-gray-500">
+                Noch keine Cases vorhanden. Lege links deinen ersten Case an.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <a href="{{ base_path }}/lager/{{ session.current_lager }}" class="inline-block mt-6 text-sm text-gray-400 hover:text-white">
+        <i class="fas fa-arrow-left mr-2"></i>Zurück zum Lager
+    </a>
+</div>
+{% endblock %}

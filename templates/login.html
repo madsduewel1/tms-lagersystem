@@ -317,17 +317,17 @@
             <h1 class="text-3xl font-bold text-center mb-8">
                 <i class="fas fa-server mr-3"></i>DMS - Device Management System
             </h1>
-            <form method="POST" action="/login" id="loginForm">
-                <input type="text" name="user_id" placeholder="Benutzer ID eingeben" 
+            <form method="POST" action="{{ url_for('login') }}" id="loginForm">
+                <input type="text" name="user_id" placeholder="Benutzer-ID" 
                        class="w-full p-3 bg-gray-700 rounded border-gray-600 focus:border-blue-500 focus:outline-none"
                        data-autofocus onkeypress="submitFormOnEnter(event, 'loginForm')" required>
+                <input type="password" name="password" placeholder="Passwort"
+                       class="w-full mt-3 p-3 bg-gray-700 rounded border-gray-600 focus:border-blue-500 focus:outline-none"
+                       onkeypress="submitFormOnEnter(event, 'loginForm')" required>
                 <button type="submit" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 p-3 rounded font-semibold transition">
                     <i class="fas fa-sign-in-alt mr-2"></i>Anmelden
                 </button>
             </form>
-            <div class="mt-4 text-center text-gray-400 text-sm">
-                Entwickelt von <strong>Matti Krebedler</strong>
-            </div>
         </div>
     </div>
 </div>

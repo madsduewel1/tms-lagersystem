@@ -13,7 +13,7 @@
         <div class="flex flex-col sm:flex-row gap-3 sm:gap-4">
             <input type="text" name="qr_code" 
                    placeholder="{% if system_type == 'personal' %}Rückgabe-QR-Code{% else %}Geräte-Barcode{% endif %} scannen"
-                   class="flex-1 p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-blue-500 focus:outline-none text-sm sm:text-base border border-gray-600 text-gray-100"
+                   class="flex-1 p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-gray-700 focus:outline-none text-sm sm:text-base border border-gray-600 text-gray-100"
                    data-autofocus>
             <button type="submit" name="scan_qr" 
                     class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 active:bg-blue-800 px-6 py-3 rounded-lg sm:rounded-xl font-semibold transition-colors touch-manipulation text-sm sm:text-base">
@@ -47,7 +47,7 @@
                             </p>
                         </div>
                     </div>
-                    <a href="/return?qr={{ device[3] }}" 
+                    <a href="{{ base_path }}/return?qr={{ device[3] }}" 
                        class="w-full sm:w-auto text-center bg-green-600 hover:bg-green-700 active:bg-green-800 px-4 py-2 rounded-lg font-semibold transition-colors touch-manipulation text-sm sm:text-base whitespace-nowrap">
                         <i class="fas fa-undo mr-2"></i>Zurückgeben
                     </a>
@@ -90,7 +90,7 @@
     {% endif %}
 
     <!-- Back Button -->
-    <a href="/lager/{{ session.current_lager }}" 
+    <a href="{{ base_path }}/lager/{{ session.current_lager }}" 
        class="block text-center text-gray-400 hover:text-white active:text-gray-300 transition-colors py-3 touch-manipulation text-sm sm:text-base">
         <i class="fas fa-arrow-left mr-2"></i>Zurück
     </a>
@@ -141,7 +141,7 @@
     
     input[type="checkbox"]:focus {
         outline: none;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+        box-shadow: none;
     }
 </style>
 

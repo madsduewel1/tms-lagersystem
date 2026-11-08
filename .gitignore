@@ -1,0 +1,21 @@
+# Laufzeitdaten und Backups
+backups/
+system_backups/
+uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Umgebungsvariablen
+.env
+.env.*
+
+# Logs
+*.log

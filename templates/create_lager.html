@@ -1,17 +1,19 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-md mx-auto">
-    <h1 class="text-3xl font-bold text-center mb-8">
-        <i class="fas fa-plus mr-3"></i>Neues Lager
+<div class="w-full max-w-2xl">
+    <h1 class="text-2xl font-semibold mb-6">
+        <i class="fas fa-plus mr-2"></i>Neues Lager
     </h1>
-    <form method="POST" class="bg-gray-800 p-6 rounded-lg" id="createLagerForm">
-        <input type="text" name="name" placeholder="Lager Name" 
-               class="w-full p-3 bg-gray-700 rounded border-gray-600 focus:border-blue-500 focus:outline-none mb-4"
+    <form method="POST" class="bg-gray-900 border border-gray-800 p-6 rounded-xl" id="createLagerForm">
+        <label class="block text-xs text-gray-400 mb-2" for="name">Lager Name</label>
+        <input type="text" id="name" name="name" placeholder="Lager Name"
+               class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-6"
                data-autofocus required>
-        <h3 class="text-lg font-semibold mb-3">System Layout:</h3>
-        <div class="mb-4">
-            <label class="flex items-center mb-2">
+
+        <h3 class="text-sm font-medium mb-3">System Layout</h3>
+        <div class="mb-6 space-y-2 text-sm">
+            <label class="flex items-center">
                 <input type="radio" name="system_type" value="personal" class="mr-3" checked>
                 <span>Personal (Ausleihe an sich selbst)</span>
             </label>
@@ -20,20 +22,25 @@
                 <span>Institutional (Ausleihe an andere Personen)</span>
             </label>
         </div>
-        <h3 class="text-lg font-semibold mb-3">Zugriff gewähren:</h3>
-        <div class="space-y-2 mb-6">
+
+        <h3 class="text-sm font-medium mb-3">Zugriff gewähren</h3>
+        <div class="space-y-2 mb-6 text-sm">
             {% for user in users %}
+            {% set is_self = user[0]|string == session['user_id']|string %}
             <label class="flex items-center">
-                <input type="checkbox" name="access_users" value="{{ user[0] }}" class="mr-3">
-                <span>{{ user[1] }} ({{ user[0] }})</span>
+                <input type="checkbox" name="access_users" value="{{ user[0] }}" class="mr-3" {% if is_self %}checked{% endif %}>
+                <span>{{ user[1] }} ({{ user[0] }}){% if is_self %} – du{% endif %}</span>
             </label>
+            {% else %}
+            <p class="text-gray-500">Keine Benutzer vorhanden.</p>
             {% endfor %}
         </div>
-        <button type="submit" class="w-full bg-green-600 hover:bg-green-700 p-3 rounded font-semibold transition">
+
+        <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 p-3 rounded-lg font-medium transition">
             <i class="fas fa-check mr-2"></i>Lager erstellen
         </button>
     </form>
-    <a href="/dashboard" class="block text-center mt-4 text-gray-400 hover:text-white">
+    <a href="{{ base_path }}/dashboard" class="inline-block mt-4 text-sm text-gray-400 hover:text-white">
         <i class="fas fa-arrow-left mr-2"></i>Zurück zum Dashboard
     </a>
 </div>

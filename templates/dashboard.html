@@ -1,356 +1,197 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="px-4 sm:px-0 pb-4">
+<div class="w-full pb-4">
 
     <!-- Header Section -->
-    <div class="text-center mb-8 sm:mb-12">
-        <p class="text-gold/60 text-xs sm:text-sm uppercase tracking-widest mb-2">Willkommen zurueck</p>
-        <h1 class="text-3xl sm:text-5xl font-light mb-2">
-            Hallo <span class="text-gold font-medium">{{ session.user_name }}</span>
+    <div class="mb-8">
+        <p class="text-gray-500 text-xs uppercase tracking-widest mb-1">Willkommen zurück</p>
+        <h1 class="text-3xl sm:text-4xl font-light">
+            Hallo <span class="font-medium text-white">{{ session.user_name }}</span>
+            {% if session.role == 'admin' %}
+            <span class="ml-3 align-middle text-xs font-medium px-2 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300">Admin</span>
+            {% endif %}
         </h1>
     </div>
-    
+
+    {% if session.role == 'admin' %}
     <!-- Quick Actions -->
-    <div class="grid grid-cols-3 gap-3 sm:gap-6 max-w-2xl mx-auto mb-8 sm:mb-12">
-        <a href="/manage_lager" class="action-card group">
-            <div class="action-card-inner">
-                <div class="action-icon bg-blue-500/10 group-hover:bg-blue-500/20">
-                    <i class="fas fa-cog text-xl sm:text-3xl text-blue-400"></i>
-                </div>
-                <h2 class="text-xs sm:text-base font-medium mt-3 sm:mt-4 text-white/80 group-hover:text-white">Lager verwalten</h2>
-            </div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+        <a href="{{ base_path }}/manage_lager" class="action-card">
+            <span class="inline-flex w-11 h-11 items-center justify-center rounded-lg bg-blue-500/10"><i class="fas fa-cog text-xl text-blue-400"></i></span>
+            <h2 class="text-sm font-medium mt-3 text-gray-200">Lager verwalten</h2>
+            <p class="text-xs text-gray-500 mt-1">Lager bearbeiten und für Mitglieder freigeben</p>
         </a>
 
-        <a href="/spotify" class="action-card group spotify-card">
-            <div class="action-card-inner">
-                <div class="action-icon bg-green-500/10 group-hover:bg-green-500/20">
-                    <i class="fa-brands fa-spotify text-xl sm:text-3xl text-green-400"></i>
-                </div>
-                <h2 class="text-xs sm:text-base font-medium mt-3 sm:mt-4 text-white/80 group-hover:text-white">Spotify Starten</h2>
-            </div>
+        <a href="{{ base_path }}/verwaltung" class="action-card">
+            <span class="inline-flex w-11 h-11 items-center justify-center rounded-lg bg-purple-500/10"><i class="fas fa-users text-xl text-purple-400"></i></span>
+            <h2 class="text-sm font-medium mt-3 text-gray-200">Verwaltung</h2>
+            <p class="text-xs text-gray-500 mt-1">Benutzer anlegen, Passwörter und Rollen verwalten</p>
         </a>
 
-        <a href="/smarthome" class="action-card group smarthome-card">
-            <div class="action-card-inner">
-                <div class="action-icon bg-violet-500/10 group-hover:bg-violet-500/20">
-                    <i class="fa-solid fa-house-signal text-xl sm:text-3xl text-violet-400"></i>
-                </div>
-                <h2 class="text-xs sm:text-base font-medium mt-3 sm:mt-4 text-white/80 group-hover:text-white">Smart Home</h2>
-            </div>
-        </a>
-
-        <a href="/create_lager" class="action-card group">
-            <div class="action-card-inner">
-                <div class="action-icon bg-gold/10 group-hover:bg-gold/20">
-                    <i class="fas fa-plus text-xl sm:text-3xl text-gold"></i>
-                </div>
-                <h2 class="text-xs sm:text-base font-medium mt-3 sm:mt-4 text-white/80 group-hover:text-white">Neues Lager</h2>
-            </div>
+        <a href="{{ base_path }}/create_lager" class="action-card">
+            <span class="inline-flex w-11 h-11 items-center justify-center rounded-lg bg-emerald-500/10"><i class="fas fa-plus text-xl text-emerald-400"></i></span>
+            <h2 class="text-sm font-medium mt-3 text-gray-200">Neues Lager</h2>
+            <p class="text-xs text-gray-500 mt-1">Ein neues Lager anlegen</p>
         </a>
     </div>
-    
-    <!-- Lager Section -->
-    <div class="max-w-4xl mx-auto">
-        <div class="flex items-center justify-center gap-3 mb-6 sm:mb-8">
-            <div class="h-px flex-1 bg-gradient-to-r from-transparent to-white/10"></div>
-            <h3 class="text-base sm:text-xl font-light text-white/60 uppercase tracking-widest">Meine Lager</h3>
-            <div class="h-px flex-1 bg-gradient-to-l from-transparent to-white/10"></div>
+    {% endif %}
+
+    <!-- Events Section -->
+    <div class="w-full mb-10">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h3 class="text-sm font-medium text-gray-400 uppercase tracking-widest">Events</h3>
+            <div class="flex items-center gap-2">
+                <a href="{{ base_path }}/events" class="inline-flex items-center px-3 py-1.5 bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-lg text-xs text-gray-300 transition">
+                    <i class="fas fa-list mr-2"></i>Übersicht
+                </a>
+                <a href="{{ base_path }}/events/create" class="inline-flex items-center px-3 py-1.5 bg-pink-600 hover:bg-pink-700 rounded-lg text-xs font-medium text-white transition">
+                    <i class="fas fa-plus mr-2"></i>Neues Event
+                </a>
+            </div>
         </div>
-        
-        {% if lagers %}
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-            {% for lager in lagers %}
-            <a href="/lager/{{ lager[0] }}" class="lager-card group">
-                <div class="flex items-center sm:flex-col sm:items-center sm:text-center gap-4 sm:gap-0">
-                    <div class="lager-icon">
-                        <i class="fas fa-warehouse text-lg sm:text-2xl text-gold"></i>
-                    </div>
-                    <h4 class="font-medium text-sm sm:text-lg truncate flex-1 sm:flex-none text-white/80 group-hover:text-white">{{ lager[1] }}</h4>
+
+        {% if events %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {% for event in events %}
+            <a href="{{ base_path }}/events/{{ event.id }}" class="lager-card">
+                <div class="lager-icon" style="background: rgba(236, 72, 153, 0.1);">
+                    <i class="fas fa-calendar-alt text-lg text-pink-400"></i>
                 </div>
-                <div class="lager-glow"></div>
+                <div class="min-w-0">
+                    <h4 class="font-medium text-base truncate text-gray-100">{{ event.name }}</h4>
+                    <p class="text-xs text-gray-500 mt-1 truncate">{{ event.start_at or 'Noch kein Termin' }}</p>
+                    <p class="text-xs text-gray-600 mt-0.5 truncate">{{ event.lager_name }} · {{ event.device_quantity }} Gerät{% if event.device_quantity != 1 %}e{% endif %}</p>
+                </div>
             </a>
             {% endfor %}
         </div>
         {% else %}
         <div class="empty-state">
-            <div class="empty-icon">
-                <i class="fas fa-warehouse text-3xl sm:text-5xl text-white/20"></i>
-            </div>
-            <p class="text-white/40 text-sm sm:text-base mt-4">Noch keine Lager vorhanden</p>
-            <p class="text-white/20 text-xs sm:text-sm mt-1">Erstelle dein erstes Lager</p>
-            <a href="/create_lager" class="empty-cta">
-                <i class="fas fa-plus mr-2"></i>
-                Lager erstellen
+            <i class="fas fa-calendar-plus text-4xl text-gray-700"></i>
+            <p class="text-gray-400 text-sm mt-4">Noch keine Events</p>
+            <a href="{{ base_path }}/events/create" class="empty-cta">
+                <i class="fas fa-plus mr-2"></i>Event erstellen
             </a>
         </div>
         {% endif %}
     </div>
-    
-    <!-- Logout -->
-    <div class="mt-10 sm:mt-16 text-center">
-        <a href="/logoutdms" class="logout-btn group">
-            <i class="fas fa-sign-out-alt mr-2 group-hover:translate-x-[-2px] transition-transform"></i>
-            <span>Abmelden</span>
+
+    <!-- Lager Section -->
+    <div class="w-full">
+        <h3 class="text-sm font-medium text-gray-400 uppercase tracking-widest mb-4">Meine Lager</h3>
+
+        {% if lagers %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {% for lager in lagers %}
+            <a href="{{ base_path }}/lager/{{ lager[0] }}" class="lager-card">
+                <div class="lager-icon">
+                    <i class="fas fa-warehouse text-lg text-amber-400"></i>
+                </div>
+                <div class="min-w-0">
+                    <h4 class="font-medium text-base truncate text-gray-100">{{ lager[1] }}</h4>
+                    <p class="text-xs text-gray-500 mt-1">ID: {{ lager[0] }}</p>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <i class="fas fa-warehouse text-4xl text-gray-700"></i>
+            <p class="text-gray-400 text-sm mt-4">Noch keine Lager vorhanden</p>
+            {% if session.role == 'admin' %}
+            <a href="{{ base_path }}/create_lager" class="empty-cta">
+                <i class="fas fa-plus mr-2"></i>Lager erstellen
+            </a>
+            {% else %}
+            <p class="text-gray-600 text-xs mt-1">Ein Administrator muss dir ein Lager freigeben.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Konto -->
+    <div class="mt-12 flex flex-wrap gap-3">
+        <a href="{{ base_path }}/passwort" class="logout-btn">
+            <i class="fas fa-key mr-2"></i><span>Passwort ändern</span>
+        </a>
+        <a href="{{ base_path }}/logoutdms" class="logout-btn">
+            <i class="fas fa-sign-out-alt mr-2"></i><span>Abmelden</span>
         </a>
     </div>
 </div>
 
 <style>
-    /* Gold color variable */
-    .text-gold { color: #d4a853; }
-    .bg-gold\/10 { background-color: rgba(212, 168, 83, 0.1); }
-    .bg-gold\/20 { background-color: rgba(212, 168, 83, 0.2); }
-    
-    /* Action Cards */
     .action-card {
-        position: relative;
-        background: linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 16px;
-        padding: 1.25rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        overflow: hidden;
-    }
-    
-    @media (min-width: 640px) {
-        .action-card {
-            padding: 2rem;
-            border-radius: 20px;
-        }
-    }
-    
-    .action-card::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(circle at 50% 0%, rgba(212, 168, 83, 0.08) 0%, transparent 60%);
-        opacity: 0;
-        transition: opacity 0.3s ease;
-    }
-    
-    .action-card:hover::before {
-        opacity: 1;
-    }
-    
-    .action-card:hover {
-        border-color: rgba(212, 168, 83, 0.2);
-        transform: translateY(-2px);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(212, 168, 83, 0.1);
-    }
-    
-    .action-card:active {
-        transform: translateY(0);
-    }
-    
-    .action-card-inner {
-        position: relative;
-        z-index: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-    }
-    
-    .action-icon {
-        width: 48px;
-        height: 48px;
+        background: #161616;
+        border: 1px solid #2a2a2a;
         border-radius: 12px;
+        padding: 1.25rem;
+        transition: border-color 0.15s ease;
+    }
+    .action-card:hover {
+        border-color: #444444;
+    }
+    .lager-card {
         display: flex;
         align-items: center;
-        justify-content: center;
-        transition: all 0.3s ease;
-    }
-    
-    @media (min-width: 640px) {
-        .action-icon {
-            width: 64px;
-            height: 64px;
-            border-radius: 16px;
-        }
-    }
-    
-    .action-card:hover .action-icon {
-        transform: scale(1.1);
-    }
-    
-    /* Spotify Card Special */
-    .spotify-card:hover {
-        border-color: rgba(30, 215, 96, 0.3);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(30, 215, 96, 0.15);
-    }
-    
-    .spotify-card::before {
-        background: radial-gradient(circle at 50% 0%, rgba(30, 215, 96, 0.1) 0%, transparent 60%);
-    }
-    
-    /* Smart Home Card Special */
-    .smarthome-card:hover {
-        border-color: rgba(139, 92, 246, 0.3);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(139, 92, 246, 0.15);
-    }
-    
-    .smarthome-card::before {
-        background: radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.1) 0%, transparent 60%);
-    }
-    
-    /* Lager Cards */
-    .lager-card {
-        position: relative;
-        background: linear-gradient(145deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.005) 100%);
-        border: 1px solid rgba(255,255,255,0.05);
+        gap: 1rem;
+        background: #161616;
+        border: 1px solid #2a2a2a;
         border-radius: 12px;
         padding: 1rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        overflow: hidden;
+        transition: border-color 0.15s ease;
     }
-    
-    @media (min-width: 640px) {
-        .lager-card {
-            padding: 1.5rem;
-            border-radius: 16px;
-        }
-    }
-    
     .lager-card:hover {
-        border-color: rgba(212, 168, 83, 0.25);
-        background: linear-gradient(145deg, rgba(212, 168, 83, 0.05) 0%, rgba(255,255,255,0.02) 100%);
-        transform: translateY(-1px);
+        border-color: #444444;
     }
-    
-    .lager-card:active {
-        transform: scale(0.98);
-    }
-    
     .lager-icon {
-        width: 40px;
-        height: 40px;
-        background: rgba(212, 168, 83, 0.1);
+        width: 44px;
+        height: 44px;
+        background: rgba(245, 158, 11, 0.1);
         border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        transition: all 0.3s ease;
     }
-    
-    @media (min-width: 640px) {
-        .lager-icon {
-            width: 56px;
-            height: 56px;
-            border-radius: 14px;
-            margin-bottom: 0.75rem;
-        }
-    }
-    
-    .lager-card:hover .lager-icon {
-        background: rgba(212, 168, 83, 0.15);
-        transform: scale(1.05);
-    }
-    
-    .lager-glow {
-        position: absolute;
-        bottom: 0;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 60%;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(212, 168, 83, 0.3), transparent);
-        opacity: 0;
-        transition: opacity 0.3s ease;
-    }
-    
-    .lager-card:hover .lager-glow {
-        opacity: 1;
-    }
-    
-    /* Empty State */
     .empty-state {
         text-align: center;
         padding: 3rem 2rem;
-        background: linear-gradient(145deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.005) 100%);
-        border: 1px dashed rgba(255,255,255,0.1);
-        border-radius: 20px;
+        background: #161616;
+        border: 1px dashed #2a2a2a;
+        border-radius: 12px;
     }
-    
-    .empty-icon {
-        width: 80px;
-        height: 80px;
-        margin: 0 auto;
-        background: rgba(255,255,255,0.03);
-        border-radius: 20px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    
     .empty-cta {
         display: inline-flex;
         align-items: center;
-        margin-top: 1.5rem;
-        padding: 0.75rem 1.5rem;
-        background: linear-gradient(135deg, rgba(212, 168, 83, 0.15) 0%, rgba(212, 168, 83, 0.05) 100%);
-        border: 1px solid rgba(212, 168, 83, 0.3);
-        border-radius: 10px;
-        color: #d4a853;
+        margin-top: 1.25rem;
+        padding: 0.6rem 1.25rem;
+        background: #222222;
+        border: 1px solid #3a3a3a;
+        border-radius: 8px;
+        color: #e5e5e5;
         font-size: 0.875rem;
-        font-weight: 500;
-        transition: all 0.3s ease;
     }
-    
+    .empty-cta {
+        color: #fbbf24;
+    }
     .empty-cta:hover {
-        background: linear-gradient(135deg, rgba(212, 168, 83, 0.25) 0%, rgba(212, 168, 83, 0.1) 100%);
-        border-color: rgba(212, 168, 83, 0.5);
-        transform: translateY(-1px);
+        border-color: #555555;
     }
-    
-    /* Logout Button */
     .logout-btn {
         display: inline-flex;
         align-items: center;
-        justify-content: center;
-        padding: 0.75rem 1.5rem;
-        background: rgba(239, 68, 68, 0.05);
-        border: 1px solid rgba(239, 68, 68, 0.15);
-        border-radius: 10px;
-        color: rgba(239, 68, 68, 0.7);
+        padding: 0.6rem 1.25rem;
+        background: #161616;
+        border: 1px solid #2a2a2a;
+        border-radius: 8px;
+        color: #a3a3a3;
         font-size: 0.875rem;
-        transition: all 0.3s ease;
     }
-    
     .logout-btn:hover {
-        background: rgba(239, 68, 68, 0.1);
-        border-color: rgba(239, 68, 68, 0.3);
-        color: rgba(239, 68, 68, 0.9);
-    }
-    
-    .logout-btn:active {
-        transform: scale(0.98);
-    }
-    
-    /* Mobile optimizations */
-    @media (max-width: 640px) {
-        body {
-            min-height: 100vh;
-            min-height: -webkit-fill-available;
-        }
-    }
-    
-    /* Touch handling */
-    .touch-manipulation {
-        -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
-        -webkit-touch-callout: none;
-        user-select: none;
-    }
-    
-    a, button {
-        touch-action: manipulation;
-    }
-    
-    .truncate {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        border-color: #555555;
+        color: #e5e5e5;
     }
 </style>
 {% endblock %}

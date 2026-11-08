@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, flash
 from flask_cors import CORS
 from markupsafe import Markup
-import sqlite3
+from db_mysql import get_users_conn, get_lager_conn, drop_lager_db, lager_db_exists
 import os
 import random
 import string
@@ -11,6 +11,7 @@ import io
 import base64
 import shutil
 import csv
+from werkzeug.utils import secure_filename
 from docx import Document
 from docx.shared import Inches, Pt, Cm
 from io import BytesIO
@@ -22,11 +23,10 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import time
 import zipfile
+import base64
 from pathlib import Path
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
 
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -34,10 +34,6 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from PIL import Image as PILImage
 import requests
-from meross_iot.http_api import MerossHttpClient
-from meross_iot.manager import MerossManager
-from meross_iot.controller.mixins.toggle import ToggleXMixin
-from meross_iot.model.enums import OnlineStatus
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
@@ -48,235 +44,17 @@ app.secret_key = 'your-secret-key'
 VERSION = "5.0"
 LATEST_VERSION = None
 UPDATE_AVAILABLE = False
+SYSTEM_BACKUP_FORMAT = 'dms-full-system-backup'
+SYSTEM_BACKUP_VERSION = 1
+SYSTEM_BACKUP_MAX_BYTES = 512 * 1024 * 1024
 
-#------------------------Spotify Part--------------------------------------
+# Environment
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
-load_dotenv()
-
-MEROSS_EMAIL = os.getenv("MEROSS_EMAIL")
-MEROSS_PASSWORD = os.getenv("MEROSS_PASSWORD")
-API_BASE = "https://iotx-eu.meross.com"
-
-
-
-SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
-SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
-SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
-
-SCOPE = 'user-read-currently-playing user-read-playback-state user-modify-playback-state'
-
-@app.route('/clear-spotify-cache')
-def clear_spotify_cache():
-    session.clear()
-    return "Cache gelöscht! Gehe zu <a href='/spotify'>/spotify</a>"
-
-def get_spotify_client():
-    """Erstellt einen authentifizierten Spotify Client"""
-    cache_handler = spotipy.cache_handler.FlaskSessionCacheHandler(session)
-    auth_manager = SpotifyOAuth(
-        client_id=SPOTIPY_CLIENT_ID,
-        client_secret=SPOTIPY_CLIENT_SECRET,
-        redirect_uri=SPOTIPY_REDIRECT_URI,
-        scope=SCOPE,
-        cache_handler=cache_handler,
-        show_dialog=True
-    )
-    
-    if not auth_manager.validate_token(cache_handler.get_cached_token()):
-        return None
-    
-    return spotipy.Spotify(auth_manager=auth_manager)
-
-@app.route('/spotify')
-def spotify_auth():
-    """Spotify Authentifizierung"""
-    sp = get_spotify_client()
-    if sp is None:
-        cache_handler = spotipy.cache_handler.FlaskSessionCacheHandler(session)
-        auth_manager = SpotifyOAuth(
-            client_id=SPOTIPY_CLIENT_ID,
-            client_secret=SPOTIPY_CLIENT_SECRET,
-            redirect_uri=SPOTIPY_REDIRECT_URI,
-            scope=SCOPE,
-            cache_handler=cache_handler,
-            show_dialog=True
-        )
-        auth_url = auth_manager.get_authorize_url()
-        return redirect(auth_url)
-    
-    return redirect('/player')
-
-@app.route('/callback')
-def callback():
-    """Callback nach Spotify Authentifizierung"""
-    cache_handler = spotipy.cache_handler.FlaskSessionCacheHandler(session)
-    auth_manager = SpotifyOAuth(
-        client_id=SPOTIPY_CLIENT_ID,
-        client_secret=SPOTIPY_CLIENT_SECRET,
-        redirect_uri=SPOTIPY_REDIRECT_URI,
-        scope=SCOPE,
-        cache_handler=cache_handler,
-        show_dialog=True
-    )
-    
-    if request.args.get('code'):
-        auth_manager.get_access_token(request.args.get('code'))
-        return redirect('/player')
-    
-    return redirect('/')
-
-@app.route('/player')
-def player():
-    """Player Seite"""
-    sp = get_spotify_client()
-    if sp is None:
-        return redirect('/spotify')
-    
-    return render_template('player.html')
-
-@app.route('/api/current')
-def current_track():
-    """API Endpoint für aktuell gespieltes Lied"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        current = sp.current_playback()
-        if current and current['item']:
-            track = current['item']
-            return jsonify({
-                'is_playing': current['is_playing'],
-                'track_name': track['name'],
-                'artist_name': ', '.join([artist['name'] for artist in track['artists']]),
-                'album_name': track['album']['name'],
-                'album_image': track['album']['images'][0]['url'] if track['album']['images'] else None,
-                'duration_ms': track['duration_ms'],
-                'progress_ms': current['progress_ms'],
-                'volume': current['device']['volume_percent'] if current['device'] else 50
-            })
-        else:
-            return jsonify({'is_playing': False, 'message': 'Kein Track wird gerade abgespielt'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/next', methods=['POST'])
-def next_track():
-    """Nächster Track"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        sp.next_track()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/previous', methods=['POST'])
-def previous_track():
-    """Vorheriger Track"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        sp.previous_track()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/play', methods=['POST'])
-def play():
-    """Wiedergabe starten"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        sp.start_playback()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/pause', methods=['POST'])
-def pause():
-    """Wiedergabe pausieren"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        sp.pause_playback()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/volume', methods=['POST'])
-def set_volume():
-    """Lautstärke ändern"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        volume = int(request.json.get('volume', 50))
-        volume = max(0, min(100, volume))
-        sp.volume(volume)
-        return jsonify({'success': True, 'volume': volume})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/search')
-def search_tracks():
-    """Tracks suchen"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    query = request.args.get('q', '')
-    if not query or len(query) < 2:
-        return jsonify({'tracks': []})
-    
-    try:
-        results = sp.search(q=query, type='track', limit=10)
-        tracks = []
-        for item in results['tracks']['items']:
-            tracks.append({
-                'id': item['id'],
-                'uri': item['uri'],
-                'name': item['name'],
-                'artist': ', '.join([artist['name'] for artist in item['artists']]),
-                'album': item['album']['name'],
-                'image': item['album']['images'][0]['url'] if item['album']['images'] else None,
-                'duration_ms': item['duration_ms']
-            })
-        return jsonify({'tracks': tracks})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/play-track', methods=['POST'])
-def play_track():
-    """Bestimmten Track abspielen"""
-    sp = get_spotify_client()
-    if sp is None:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        track_uri = request.json.get('uri')
-        if track_uri:
-            sp.start_playback(uris=[track_uri])
-            return jsonify({'success': True})
-        return jsonify({'error': 'No URI provided'}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/spotifylogout')
-def spotify_logout():
-    """Logout"""
-    session.clear()
-    return redirect('/spotify')
-#-----------------------Spotify end ---------------------------------------
 
 def check_version():
     global LATEST_VERSION, UPDATE_AVAILABLE
@@ -296,29 +74,546 @@ def check_version():
     except Exception as e:
         print(f"Fehler beim Überprüfen der Version: {e}")
 
+from werkzeug.security import generate_password_hash, check_password_hash
+
 def init_user_db():
-    conn = sqlite3.connect('users.db')
+    conn = get_users_conn()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id TEXT PRIMARY KEY, name TEXT NOT NULL)''')
+                 (id VARCHAR(100) PRIMARY KEY, name VARCHAR(255) NOT NULL,
+                  password VARCHAR(255), role VARCHAR(20) NOT NULL DEFAULT 'user')''')
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'")
+    except Exception:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS lager
-                 (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_by TEXT,
-                   access_users TEXT, system_type DEFAULT 'personal')''')
-    c.execute("INSERT OR IGNORE INTO users VALUES ('CKS.EXampleid', 'Matti')")
-    c.execute("INSERT OR IGNORE INTO users VALUES ('CKS-Example', 'Hubert')")
-    c.execute("INSERT OR IGNORE INTO users VALUES ('CKS-Exampledsa', 'Admin')")
-    c.execute("INSERT OR IGNORE INTO users VALUES ('CKS-7sdfuh-dfi', 'Christoffer Rentsch')")
-    c.execute("INSERT OR IGNORE INTO users VALUES ('CKS-udzsfzewliuhd', 'Steffen Mascher')")
+                 (id VARCHAR(100) PRIMARY KEY, name VARCHAR(255) NOT NULL, created_by VARCHAR(100),
+                   access_users TEXT, system_type VARCHAR(50) DEFAULT 'personal')''')
+    c.execute('''CREATE TABLE IF NOT EXISTS user_groups
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                  name VARCHAR(255) NOT NULL UNIQUE)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS user_group_members
+                 (group_id INTEGER NOT NULL,
+                  user_id VARCHAR(100) NOT NULL,
+                  PRIMARY KEY (group_id, user_id))''')
+    c.execute("INSERT IGNORE INTO users (id, name, password, role) VALUES (%s, %s, %s, %s)",
+              ('TMS-T', 'TMS Technik', generate_password_hash('TMS-T'), 'admin'))
+    c.execute("UPDATE users SET role = 'admin' WHERE id = 'TMS-T'")
+    c.execute("UPDATE users SET password = %s WHERE id = 'TMS-T' AND (password IS NULL OR password = '')",
+              (generate_password_hash('TMS-T'),))
     conn.commit()
     conn.close()
+    init_events_db()
+
+
+def init_events_db():
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS events
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                  name VARCHAR(255) NOT NULL,
+                  organizer VARCHAR(255),
+                  description TEXT,
+                  lager_id VARCHAR(100) NOT NULL,
+                  start_at DATETIME NULL,
+                  end_at DATETIME NULL,
+                  created_by VARCHAR(100) NOT NULL,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS event_permissions
+                 (event_id INTEGER NOT NULL,
+                  user_id VARCHAR(100) NOT NULL,
+                  role VARCHAR(20) NOT NULL DEFAULT 'viewer',
+                  PRIMARY KEY (event_id, user_id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS event_cases
+                 (event_id INTEGER NOT NULL,
+                  lager_id VARCHAR(100) NOT NULL,
+                  case_id INTEGER NOT NULL,
+                  PRIMARY KEY (event_id, lager_id, case_id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS event_devices
+                 (event_id INTEGER NOT NULL,
+                  lager_id VARCHAR(100) NOT NULL,
+                  device_id INTEGER NOT NULL,
+                  case_id INTEGER NULL,
+                  quantity INTEGER NOT NULL DEFAULT 1,
+                  PRIMARY KEY (event_id, lager_id, device_id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS event_lagers
+                 (event_id INTEGER NOT NULL,
+                  lager_id VARCHAR(100) NOT NULL,
+                  PRIMARY KEY (event_id, lager_id))''')
+    # Migrate older single-lager event assignment tables without discarding rows.
+    for table in ('event_cases', 'event_devices'):
+        c.execute(f"SHOW COLUMNS FROM {table} LIKE 'lager_id'")
+        if not c.fetchone():
+            c.execute(f"ALTER TABLE {table} ADD COLUMN lager_id VARCHAR(100) NULL")
+            c.execute(f"UPDATE {table} item JOIN events e ON e.id = item.event_id SET item.lager_id = e.lager_id")
+            c.execute(f"ALTER TABLE {table} DROP PRIMARY KEY, ADD PRIMARY KEY (event_id, lager_id, {'case_id' if table == 'event_cases' else 'device_id'})")
+    c.execute("INSERT IGNORE INTO event_lagers (event_id, lager_id) SELECT id, lager_id FROM events")
+    c.execute('''CREATE TABLE IF NOT EXISTS event_contacts
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                  event_id INTEGER NOT NULL,
+                  name VARCHAR(255) NOT NULL,
+                  email VARCHAR(255))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS event_attachments
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                  event_id INTEGER NOT NULL,
+                  filename VARCHAR(255) NOT NULL,
+                  mimetype VARCHAR(150),
+                  data LONGBLOB NOT NULL,
+                  uploaded_by VARCHAR(100),
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    conn.commit()
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    c.execute("SELECT DISTINCT e.id FROM events e WHERE e.end_at IS NULL OR e.end_at >= ?", (now,))
+    active_events = [row[0] for row in c.fetchall()]
+    assignments = []
+    for active_event_id in active_events:
+        c.execute("SELECT lager_id, device_id FROM event_devices WHERE event_id = ?", (active_event_id,))
+        devices_by_lager = {}
+        for lager_id, device_id in c.fetchall():
+            devices_by_lager.setdefault(lager_id, []).append(device_id)
+        c.execute("SELECT lager_id, case_id FROM event_cases WHERE event_id = ?", (active_event_id,))
+        cases_by_lager = {}
+        for lager_id, case_id in c.fetchall():
+            cases_by_lager.setdefault(lager_id, []).append(case_id)
+        for lager_id in set(devices_by_lager) | set(cases_by_lager):
+            assignments.append((lager_id, devices_by_lager.get(lager_id, []), cases_by_lager.get(lager_id, [])))
+    conn.close()
+
+    for lager_id, device_ids, case_ids in assignments:
+        if lager_db_exists(lager_id):
+            refresh_event_item_statuses(lager_id, device_ids, case_ids)
+
+
+EVENT_ROLE_RANK = {'viewer': 1, 'editor': 2, 'host': 3}
+EVENT_ROLE_LABELS = {'viewer': 'Teilnehmer', 'editor': 'Bearbeiter', 'host': 'Veranstalter'}
+
+STATUS_LABELS = {
+    'verfügbar': 'Verfügbar',
+    'defekt': 'Defekt',
+    'ausgeliehen': 'Ausgeliehen',
+    'zugewiesen': 'Zugewiesen',
+}
+CASE_STATUS_VALUES = set(STATUS_LABELS)
+CASE_TYPE_VALUES = ('Case', 'Koffer', 'Eurokiste', 'Rack', 'Sonstiges')
+DEVICE_MANUAL_STATUSES = ('verfügbar', 'defekt')
+
+
+def get_user_groups():
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, name FROM user_groups ORDER BY name")
+    groups = c.fetchall()
+    c.execute("SELECT group_id, user_id FROM user_group_members")
+    members = {}
+    for group_id, user_id in c.fetchall():
+        members.setdefault(group_id, []).append(user_id)
+    conn.close()
+    return [{'id': group_id, 'name': name, 'member_ids': members.get(group_id, [])}
+            for group_id, name in groups]
+
+
+def active_event_assignment_exists(lager_id, item_id, kind):
+    conn = get_users_conn()
+    c = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if kind == 'case':
+        c.execute("""SELECT 1 FROM event_cases ec
+                     JOIN events e ON e.id = ec.event_id
+                     WHERE ec.lager_id = ? AND ec.case_id = ?
+                       AND (e.end_at IS NULL OR e.end_at >= ?)
+                     LIMIT 1""", (lager_id, item_id, now))
+    else:
+        c.execute("""SELECT 1 FROM event_devices ed
+                     JOIN events e ON e.id = ed.event_id
+                     WHERE ed.lager_id = ? AND ed.device_id = ?
+                       AND (e.end_at IS NULL OR e.end_at >= ?)
+                     LIMIT 1""", (lager_id, item_id, now))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+
+def event_assignment_conflicts(lager_id, item_id, kind, start_at, end_at, event_id=None):
+    assignment_table, item_column = ('event_cases', 'case_id') if kind == 'case' else ('event_devices', 'device_id')
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute(f"""SELECT e.start_at, e.end_at
+                  FROM {assignment_table} assignment
+                  JOIN events e ON e.id = assignment.event_id
+                  WHERE assignment.lager_id = ? AND assignment.{item_column} = ? AND e.id != ?""",
+              (lager_id, item_id, event_id or -1))
+    existing_intervals = c.fetchall()
+    conn.close()
+    for existing_start, existing_end in existing_intervals:
+        starts_before_new_end = end_at is None or existing_start is None or existing_start < end_at
+        ends_after_new_start = start_at is None or existing_end is None or existing_end > start_at
+        if starts_before_new_end and ends_after_new_start:
+            return True
+    return False
+
+
+def active_borrow_quantity(lager_id, device_id):
+    """Return the quantity currently checked out for one tracked device row."""
+    conn = get_db_connection(lager_id)
+    c = conn.cursor()
+    c.execute("""SELECT COALESCE(SUM(ad.quantity), 0)
+                 FROM ausleih_details ad
+                 JOIN ausleihen a ON a.ausleih_id = ad.ausleih_id
+                 WHERE ad.geraet_id = ? AND a.status = 'ausgeliehen'""", (device_id,))
+    quantity = c.fetchone()[0] or 0
+    conn.close()
+    return quantity
+
+
+def refresh_case_status(lager_id, case_id, conn=None):
+    should_close = False
+    if conn is None:
+        conn = get_db_connection(lager_id)
+        should_close = True
+    try:
+        c = conn.cursor()
+        c.execute("SELECT status FROM cases WHERE id = ?", (case_id,))
+        row = c.fetchone()
+        if not row:
+            return
+        current = row[0]
+        if current == 'defekt':
+            return
+        if active_event_assignment_exists(lager_id, case_id, 'case'):
+            new_status = 'zugewiesen'
+        elif current == 'zugewiesen':
+            new_status = 'verfügbar'
+        else:
+            new_status = current or 'verfügbar'
+        c.execute("UPDATE cases SET status = ? WHERE id = ?", (new_status, case_id))
+        if should_close:
+            conn.commit()
+    finally:
+        if should_close and conn:
+            conn.close()
+
+
+def refresh_event_item_statuses(lager_id, device_ids, case_ids):
+    device_ids = set(device_ids)
+    case_ids = set(case_ids)
+    if not device_ids and not case_ids:
+        return
+    conn = get_db_connection(lager_id)
+    try:
+        for device_id in device_ids:
+            update_device_status(lager_id, device_id, conn)
+        for case_id in case_ids:
+            refresh_case_status(lager_id, case_id, conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_event_role(event_id, user_id):
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT role FROM event_permissions WHERE event_id = ? AND user_id = ?", (event_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def event_can_view(event_id, user_id):
+    return EVENT_ROLE_RANK.get(get_event_role(event_id, user_id), 0) >= 1
+
+
+def event_can_edit(event_id, user_id):
+    return EVENT_ROLE_RANK.get(get_event_role(event_id, user_id), 0) >= 2
+
+
+def event_is_host(event_id, user_id):
+    return get_event_role(event_id, user_id) == 'host'
+
+
+def get_accessible_lagers(user_id, admin=False):
+    conn = get_users_conn()
+    c = conn.cursor()
+    if admin:
+        c.execute("SELECT id, name FROM lager ORDER BY name")
+    else:
+        c.execute("SELECT id, name FROM lager WHERE created_by = ? OR FIND_IN_SET(?, access_users) > 0 ORDER BY name",
+                  (user_id, user_id))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def user_has_lager_access(lager_id, user_id, admin=False):
+    conn = get_users_conn()
+    c = conn.cursor()
+    if admin:
+        c.execute("SELECT id FROM lager WHERE id = ?", (lager_id,))
+    else:
+        c.execute("SELECT id FROM lager WHERE id = ? AND (created_by = ? OR FIND_IN_SET(?, access_users) > 0)",
+                  (lager_id, user_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+
+def get_lager_name(lager_id):
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT name FROM lager WHERE id = ?", (lager_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else lager_id
+
+
+def load_event_lager_data(lager_id):
+    create_warehouse_db(lager_id)
+    conn = get_db_connection(lager_id)
+    c = conn.cursor()
+    c.execute("SELECT id, name, barcode, status FROM cases ORDER BY name")
+    case_rows = c.fetchall()
+    c.execute("""SELECT g.id, g.name, g.barcode, g.quantity, g.status, cd.case_id, c.name
+                 FROM geraete g
+                 LEFT JOIN case_devices cd ON cd.geraet_id = g.id
+                 LEFT JOIN cases c ON c.id = cd.case_id
+                 ORDER BY g.name""")
+    device_rows = c.fetchall()
+    conn.close()
+
+    case_device_map = {row[0]: [] for row in case_rows}
+    devices = []
+    for row in device_rows:
+        device = {
+            'id': row[0],
+            'name': row[1],
+            'barcode': row[2],
+            'quantity': row[3] or 1,
+            'status': row[4] or 'verfügbar',
+            'case_id': row[5],
+            'case_name': row[6],
+        }
+        devices.append(device)
+        if row[5] is not None and row[5] in case_device_map:
+            case_device_map[row[5]].append(device['id'])
+
+    device_status_by_id = {device['id']: device['status'] for device in devices}
+    cases = [{'id': row[0], 'name': row[1], 'barcode': row[2],
+              'status': row[3] or 'verfügbar',
+              'device_ids': case_device_map.get(row[0], []),
+              'has_defect': any(device_status_by_id.get(device_id) == 'defekt'
+                                for device_id in case_device_map.get(row[0], []))}
+             for row in case_rows]
+    return cases, devices
+
+
+def parse_event_datetime(value):
+    value = (value or '').strip()
+    if not value:
+        return None
+    value = value.replace('T', ' ')
+    if len(value) == 16:
+        value += ':00'
+    if len(value) == 10:
+        value += ' 00:00:00'
+    return value
+
+
+def datetime_for_input(value):
+    if not value:
+        return ''
+    return str(value).replace(' ', 'T')[:16]
+
+
+def get_user_events(user_id, limit=None):
+    conn = get_users_conn()
+    c = conn.cursor()
+    query = """SELECT e.id, e.name, e.organizer, e.description, e.lager_id,
+                      e.start_at, e.end_at, e.created_by, e.created_at,
+                      COALESCE((SELECT GROUP_CONCAT(l2.name ORDER BY l2.name SEPARATOR ', ')
+                                FROM event_lagers el2 JOIN lager l2 ON l2.id = el2.lager_id
+                                WHERE el2.event_id = e.id), l.name), ep.role,
+                      (SELECT COALESCE(SUM(ed.quantity), 0) FROM event_devices ed WHERE ed.event_id = e.id)
+               FROM events e
+               JOIN event_permissions ep ON ep.event_id = e.id AND ep.user_id = ?
+               LEFT JOIN lager l ON l.id = e.lager_id
+               ORDER BY (e.start_at IS NULL), e.start_at, e.id DESC"""
+    params = [user_id]
+    if limit:
+        query += " LIMIT %s"
+        params.append(int(limit))
+    c.execute(query, tuple(params))
+    rows = c.fetchall()
+    conn.close()
+    events = []
+    for row in rows:
+        events.append({
+            'id': row[0], 'name': row[1], 'organizer': row[2], 'description': row[3],
+            'lager_id': row[4], 'start_at': str(row[5]) if row[5] else None,
+            'end_at': str(row[6]) if row[6] else None, 'created_by': row[7],
+            'created_at': str(row[8]) if row[8] else None,
+            'lager_name': row[9] or row[4], 'role': row[10],
+            'device_quantity': row[11] or 0,
+        })
+    return events
+
+
+def is_admin():
+    return session.get('role') == 'admin'
+
+
+def require_login():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    return None
+
+
+def require_admin():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not is_admin():
+        return redirect(url_for('dashboard'))
+    return None
+
+
+def _backup_json_value(value):
+    if isinstance(value, (bytes, bytearray)):
+        return {'__dms_binary__': base64.b64encode(bytes(value)).decode('ascii')}
+    if hasattr(value, 'isoformat'):
+        return value.isoformat(sep=' ') if isinstance(value, datetime) else value.isoformat()
+    return str(value) if value is not None and not isinstance(value, (str, int, float, bool)) else value
+
+
+def _restore_json_value(value):
+    if isinstance(value, dict) and set(value) == {'__dms_binary__'}:
+        return base64.b64decode(value['__dms_binary__'], validate=True)
+    return value
+
+
+def _safe_sql_identifier(identifier):
+    identifier = str(identifier)
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', identifier):
+        raise ValueError('Ungültiger Tabellenname in der Sicherungsdatei.')
+    return f'`{identifier}`'
+
+
+def _snapshot_database(connection):
+    cursor = connection.cursor()
+    cursor.execute('SHOW TABLES')
+    table_names = sorted(row[0] for row in cursor.fetchall())
+    snapshot = {}
+    for table_name in table_names:
+        quoted = _safe_sql_identifier(table_name)
+        cursor.execute(f'SHOW COLUMNS FROM {quoted}')
+        columns = [row[0] for row in cursor.fetchall()]
+        cursor.execute(f'SELECT * FROM {quoted}')
+        rows = [[_backup_json_value(value) for value in row] for row in cursor.fetchall()]
+        snapshot[table_name] = {'columns': columns, 'rows': rows}
+    connection.close()
+    return snapshot
+
+
+def _build_system_backup():
+    users_conn = get_users_conn()
+    users_cursor = users_conn.cursor()
+    users_cursor.execute('SELECT id FROM lager ORDER BY id')
+    lager_ids = [row[0] for row in users_cursor.fetchall()]
+    users_snapshot = _snapshot_database(users_conn)
+
+    warehouses = {}
+    for lager_id in lager_ids:
+        warehouse_conn = get_db_connection(lager_id)
+        warehouses[str(lager_id)] = _snapshot_database(warehouse_conn)
+
+    payload = {
+        'format': SYSTEM_BACKUP_FORMAT,
+        'format_version': SYSTEM_BACKUP_VERSION,
+        'app_version': VERSION,
+        'created_at': datetime.now().isoformat(timespec='seconds'),
+        'users_database': users_snapshot,
+        'warehouses': warehouses,
+    }
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as zipped:
+        zipped.writestr('backup.json', json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
+    archive.seek(0)
+    return archive
+
+
+def _validate_system_backup(payload):
+    if not isinstance(payload, dict) or payload.get('format') != SYSTEM_BACKUP_FORMAT:
+        raise ValueError('Die Datei ist kein vollständiger DMS-Systemexport.')
+    if payload.get('format_version') != SYSTEM_BACKUP_VERSION:
+        raise ValueError('Diese Version des Systemexports wird nicht unterstützt.')
+    if not isinstance(payload.get('users_database'), dict) or not isinstance(payload.get('warehouses'), dict):
+        raise ValueError('Die Sicherungsdatei enthält keine vollständigen Benutzer- und Lagerdaten.')
+    if 'users' not in payload['users_database'] or 'lager' not in payload['users_database']:
+        raise ValueError('Die Sicherungsdatei enthält keine Benutzer- oder Lagerliste.')
+    for lager_id, tables in payload['warehouses'].items():
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', str(lager_id)) or not isinstance(tables, dict):
+            raise ValueError('Die Sicherungsdatei enthält eine ungültige Lager-ID.')
+    for database in [payload['users_database'], *payload['warehouses'].values()]:
+        for table_name, table_data in database.items():
+            _safe_sql_identifier(table_name)
+            if (not isinstance(table_data, dict) or not isinstance(table_data.get('columns'), list)
+                    or not isinstance(table_data.get('rows'), list)):
+                raise ValueError('Die Sicherungsdatei enthält ungültige Tabellendaten.')
+            if any(not isinstance(row, list) or len(row) != len(table_data['columns']) for row in table_data['rows']):
+                raise ValueError(f'Die Sicherungsdatei enthält ungültige Zeilen in {table_name}.')
+
+
+def _replace_database_contents(connection, snapshot):
+    cursor = connection.cursor()
+    cursor.execute('SHOW TABLES')
+    target_tables = {row[0] for row in cursor.fetchall()}
+    missing_tables = set(snapshot) - target_tables
+    if missing_tables:
+        raise ValueError('Zieldatenbank hat fehlende Tabellen: ' + ', '.join(sorted(missing_tables)))
+
+    target_columns = {}
+    auto_increment_tables = set()
+    for table_name in target_tables:
+        quoted = _safe_sql_identifier(table_name)
+        cursor.execute(f'SHOW COLUMNS FROM {quoted}')
+        details = cursor.fetchall()
+        target_columns[table_name] = {row[0] for row in details}
+        if any('auto_increment' in str(row[5]).lower() for row in details):
+            auto_increment_tables.add(table_name)
+
+    for table_name, table_data in snapshot.items():
+        if not set(table_data['columns']).issubset(target_columns[table_name]):
+            raise ValueError(f'Die Zieldatenbank hat eine inkompatible Tabellenstruktur bei {table_name}.')
+
+    try:
+        # MariaDB schemas used by the application have no foreign-key constraints.
+        # Clear all target tables so target-only tables cannot retain stale data.
+        for table_name in sorted(target_tables):
+            cursor.execute(f'DELETE FROM {_safe_sql_identifier(table_name)}')
+        for table_name in sorted(auto_increment_tables):
+            cursor.execute(f'ALTER TABLE {_safe_sql_identifier(table_name)} AUTO_INCREMENT = 1')
+
+        for table_name, table_data in snapshot.items():
+            if not table_data['rows']:
+                continue
+            columns = table_data['columns']
+            quoted_columns = ', '.join(_safe_sql_identifier(column) for column in columns)
+            placeholders = ', '.join('?' for _ in columns)
+            sql = f'INSERT INTO {_safe_sql_identifier(table_name)} ({quoted_columns}) VALUES ({placeholders})'
+            for row in table_data['rows']:
+                cursor.execute(sql, tuple(_restore_json_value(value) for value in row))
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 def create_warehouse_db(lager_id):
-    conn = sqlite3.connect(f'{lager_id}.db')
+    conn = get_lager_conn(lager_id)
     c = conn.cursor()
-    c.execute('''CREATE TABLE geraete
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+    c.execute('''CREATE TABLE IF NOT EXISTS geraete
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
                    name TEXT NOT NULL,
-                   barcode TEXT UNIQUE NOT NULL,
+                   barcode VARCHAR(255) UNIQUE NOT NULL,
                    lagerplatz TEXT NOT NULL,
                    status TEXT DEFAULT 'verfügbar',
                    beschreibung TEXT,
@@ -329,11 +624,30 @@ def create_warehouse_db(lager_id):
                    kaufdatum TEXT,
                    preis REAL,
                    quantity INTEGER DEFAULT 1,
-                   hersteller TEXT)''')
-    c.execute('''CREATE TABLE ausleihen
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   ausleih_id TEXT NOT NULL,
-                   mitarbeiter_id TEXT NOT NULL,
+                   hersteller TEXT,
+                   lagerort TEXT,
+                   mietpreis REAL,
+                   dmx_universum INTEGER,
+                   dmx_startadresse INTEGER,
+                   dmx_kanaele INTEGER,
+                   dmx_belegung LONGTEXT,
+                   bild_mimetype VARCHAR(100),
+                   bild_daten LONGBLOB)''')
+    for definition in (
+        'lagerort TEXT', 'mietpreis REAL', 'dmx_universum INTEGER',
+        'dmx_startadresse INTEGER', 'dmx_kanaele INTEGER', 'dmx_belegung LONGTEXT',
+        'bild_mimetype VARCHAR(100)', 'bild_daten LONGBLOB',
+    ):
+        try:
+            c.execute(f"ALTER TABLE geraete ADD COLUMN {definition}")
+        except Exception as exc:
+            if 'duplicate column' not in str(exc).lower():
+                conn.close()
+                raise
+    c.execute('''CREATE TABLE IF NOT EXISTS ausleihen
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                   ausleih_id VARCHAR(255) NOT NULL,
+                   mitarbeiter_id VARCHAR(255) NOT NULL,
                    mitarbeiter_name TEXT NOT NULL,
                    zielort TEXT NOT NULL,
                    datum TEXT NOT NULL,
@@ -341,311 +655,80 @@ def create_warehouse_db(lager_id):
                    status TEXT DEFAULT 'ausgeliehen',
                    email TEXT,
                    klasse TEXT)''')
-    c.execute('''CREATE TABLE ausleih_details
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   ausleih_id TEXT NOT NULL,
+    c.execute('''CREATE TABLE IF NOT EXISTS ausleih_details
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                   ausleih_id VARCHAR(255) NOT NULL,
                    geraet_id INTEGER NOT NULL,
-                   geraet_barcode TEXT NOT NULL,
+                   geraet_barcode VARCHAR(255) NOT NULL,
                    quantity INTEGER DEFAULT 1,
-                   FOREIGN KEY(ausleih_id) REFERENCES ausleihen(ausleih_id),
-                   FOREIGN KEY(geraet_id) REFERENCES geraete(id))''')
-    c.execute('''CREATE TABLE label_layouts
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   INDEX idx_ausleih_id (ausleih_id),
+                   INDEX idx_geraet_id (geraet_id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS label_layouts
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
                    name TEXT NOT NULL,
-                   layout_data TEXT NOT NULL,
+                   layout_data LONGTEXT NOT NULL,
                    is_default INTEGER DEFAULT 0,
                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS cases
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                   name VARCHAR(255) NOT NULL,
+                   barcode VARCHAR(255) UNIQUE,
+                   status TEXT DEFAULT 'verfügbar',
+                   beschreibung TEXT,
+                   lagerplatz TEXT,
+                   lagerort TEXT,
+                   created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+    try:
+        c.execute("ALTER TABLE cases ADD COLUMN lagerort TEXT")
+    except Exception as exc:
+        if 'duplicate column' not in str(exc).lower():
+            conn.close()
+            raise
+    try:
+        c.execute("ALTER TABLE cases ADD COLUMN status TEXT DEFAULT 'verfügbar'")
+    except Exception as exc:
+        if 'duplicate column' not in str(exc).lower():
+            conn.close()
+            raise
+    try:
+        c.execute("ALTER TABLE cases ADD COLUMN case_type VARCHAR(50) DEFAULT 'Case'")
+    except Exception as exc:
+        if 'duplicate column' not in str(exc).lower():
+            conn.close()
+            raise
+    c.execute("UPDATE cases SET case_type = 'Case' WHERE case_type IS NULL OR case_type = ''")
+    c.execute("""UPDATE geraete g
+                 SET status = CASE
+                     WHEN EXISTS (
+                         SELECT 1 FROM ausleih_details ad
+                         JOIN ausleihen a ON ad.ausleih_id = a.ausleih_id
+                         WHERE ad.geraet_id = g.id AND a.status = 'ausgeliehen'
+                     ) THEN 'ausgeliehen'
+                     ELSE 'verfügbar'
+                 END
+                 WHERE g.status IS NULL
+                    OR g.status NOT IN ('verfügbar', 'defekt', 'ausgeliehen', 'zugewiesen')""")
+    c.execute('''CREATE TABLE IF NOT EXISTS case_devices
+                 (case_id INTEGER NOT NULL,
+                   geraet_id INTEGER NOT NULL,
+                   PRIMARY KEY (case_id, geraet_id),
+                   UNIQUE KEY uq_case_device (geraet_id),
+                   INDEX idx_case_id (case_id))''')
     conn.commit()
     conn.close()
 
-import sqlite3
 import shutil
 from datetime import datetime
-import os
-
-def backup_database(db_path, operation="auto_migration"):
-    """Create a backup of the database before making changes"""
-    os.makedirs('backups', exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_path = f'backups/{timestamp}_{operation}_{os.path.basename(db_path)}'
-    shutil.copy(db_path, backup_path)
-    print(f"Backup erstellt: {backup_path}")
-    return backup_path
-
-def get_table_columns(conn, table_name):
-    """Get all columns of a table"""
-    cursor = conn.cursor()
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    return {row[1]: row[2] for row in cursor.fetchall()}  # {column_name: column_type}
-
-def add_missing_column(conn, table_name, column_name, column_type, default_value=None):
-    """Add a missing column to a table"""
-    cursor = conn.cursor()
-    try:
-        sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
-        if default_value is not None:
-            sql += f" DEFAULT {default_value}"
-        cursor.execute(sql)
-        conn.commit()
-        print(f"Spalte hinzugefügt: {table_name}.{column_name} ({column_type})")
-        return True
-    except sqlite3.Error as e:
-        print(f"Fehler beim Hinzufügen der Spalte {column_name}: {e}")
-        return False
-
-def check_and_migrate_warehouse_db(lager_id):
-    """Check and migrate a warehouse database with all required columns"""
-    db_path = f'{lager_id}.db'
-    
-    if not os.path.exists(db_path):
-        print(f"Datenbank {db_path} existiert nicht")
-        return False
-    
-    # Backup vor Migration
-    backup_database(db_path, "migration")
-    
-    conn = sqlite3.connect(db_path)
-    
-    try:
-        # Definiere erwartete Spalten für jede Tabelle
-        expected_schema = {
-            'geraete': {
-                'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
-                'name': 'TEXT NOT NULL',
-                'barcode': 'TEXT UNIQUE NOT NULL',
-                'lagerplatz': 'TEXT NOT NULL',
-                'status': 'TEXT DEFAULT "verfügbar"',
-                'beschreibung': 'TEXT',
-                'seriennummer': 'TEXT',
-                'modell': 'TEXT',
-                'instrumentenart': 'TEXT',
-                'inventarnummer': 'TEXT',
-                'kaufdatum': 'TEXT',
-                'preis': 'REAL',
-                'quantity': 'INTEGER DEFAULT 1',
-                'hersteller': 'TEXT'
-            },
-            'ausleihen': {
-                'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
-                'ausleih_id': 'TEXT NOT NULL',
-                'mitarbeiter_id': 'TEXT NOT NULL',
-                'mitarbeiter_name': 'TEXT NOT NULL',
-                'zielort': 'TEXT NOT NULL',
-                'datum': 'TEXT NOT NULL',
-                'rueckgabe_qr': 'TEXT NOT NULL',
-                'status': 'TEXT DEFAULT "ausgeliehen"',
-                'email': 'TEXT',
-                'klasse': 'TEXT'
-            },
-            'ausleih_details': {
-                'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
-                'ausleih_id': 'TEXT NOT NULL',
-                'geraet_id': 'INTEGER NOT NULL',
-                'geraet_barcode': 'TEXT NOT NULL',
-                'quantity': 'INTEGER DEFAULT 1'
-            },
-            'label_layouts': {
-                'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
-                'name': 'TEXT NOT NULL',
-                'layout_data': 'TEXT NOT NULL',
-                'is_default': 'INTEGER DEFAULT 0',
-                'created_at': 'TEXT DEFAULT CURRENT_TIMESTAMP',
-                'updated_at': 'TEXT DEFAULT CURRENT_TIMESTAMP'
-            }
-        }
-        
-        changes_made = False
-        
-        # Prüfe jede Tabelle
-        for table_name, expected_columns in expected_schema.items():
-            # Prüfe ob Tabelle existiert
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-            
-            if not cursor.fetchone():
-                print(f"Tabelle {table_name} existiert nicht - wird erstellt")
-                # Tabelle erstellen (hier könntest du die CREATE TABLE Statements einfügen)
-                if table_name == 'geraete':
-                    cursor.execute('''CREATE TABLE geraete
-                                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                       name TEXT NOT NULL,
-                                       barcode TEXT UNIQUE NOT NULL,
-                                       lagerplatz TEXT NOT NULL,
-                                       status TEXT DEFAULT 'verfügbar',
-                                       beschreibung TEXT,
-                                       seriennummer TEXT,
-                                       modell TEXT,
-                                       instrumentenart TEXT,
-                                       inventarnummer TEXT,
-                                       kaufdatum TEXT,
-                                       preis REAL,
-                                       quantity INTEGER DEFAULT 1,
-                                       hersteller TEXT)''')
-                elif table_name == 'ausleihen':
-                    cursor.execute('''CREATE TABLE ausleihen
-                                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                       ausleih_id TEXT NOT NULL,
-                                       mitarbeiter_id TEXT NOT NULL,
-                                       mitarbeiter_name TEXT NOT NULL,
-                                       zielort TEXT NOT NULL,
-                                       datum TEXT NOT NULL,
-                                       rueckgabe_qr TEXT NOT NULL,
-                                       status TEXT DEFAULT 'ausgeliehen',
-                                       email TEXT,
-                                       klasse TEXT)''')
-                elif table_name == 'ausleih_details':
-                    cursor.execute('''CREATE TABLE ausleih_details
-                                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                       ausleih_id TEXT NOT NULL,
-                                       geraet_id INTEGER NOT NULL,
-                                       geraet_barcode TEXT NOT NULL,
-                                       quantity INTEGER DEFAULT 1,
-                                       FOREIGN KEY(ausleih_id) REFERENCES ausleihen(ausleih_id),
-                                       FOREIGN KEY(geraet_id) REFERENCES geraete(id))''')
-                elif table_name == 'label_layouts':
-                    cursor.execute('''CREATE TABLE label_layouts
-                                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                       name TEXT NOT NULL,
-                                       layout_data TEXT NOT NULL,
-                                       is_default INTEGER DEFAULT 0,
-                                       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                                       updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-                conn.commit()
-                changes_made = True
-                continue
-            
-            # Hole aktuelle Spalten
-            current_columns = get_table_columns(conn, table_name)
-            
-            # Prüfe fehlende Spalten
-            for column_name, column_type in expected_columns.items():
-                if column_name not in current_columns:
-                    print(f"Fehlende Spalte erkannt: {table_name}.{column_name}")
-                    
-                    # Extrahiere DEFAULT-Wert wenn vorhanden
-                    default_value = None
-                    if 'DEFAULT' in column_type:
-                        parts = column_type.split('DEFAULT')
-                        column_type = parts[0].strip()
-                        default_value = parts[1].strip().strip("'\"")
-                        if default_value.upper() != 'CURRENT_TIMESTAMP':
-                            default_value = f"'{default_value}'"
-                    
-                    if add_missing_column(conn, table_name, column_name, column_type, default_value):
-                        changes_made = True
-        
-        if changes_made:
-            print(f"Migration für {lager_id} abgeschlossen")
-        else:
-            print(f"Keine Änderungen für {lager_id} erforderlich")
-        
-        return True
-        
-    except Exception as e:
-        print(f"Fehler bei der Migration: {e}")
-        return False
-    finally:
-        conn.close()
-
-def check_and_migrate_users_db():
-    """Check and migrate the users database"""
-    db_path = 'users.db'
-    
-    if not os.path.exists(db_path):
-        print("users.db existiert nicht - wird initialisiert")
-        init_user_db()
-        return
-    
-    backup_database(db_path, "migration")
-    
-    conn = sqlite3.connect(db_path)
-    
-    try:
-        # Erwartete Spalten für users.db
-        expected_schema = {
-            'users': {
-                'id': 'TEXT PRIMARY KEY',
-                'name': 'TEXT NOT NULL'
-            },
-            'lager': {
-                'id': 'TEXT PRIMARY KEY',
-                'name': 'TEXT NOT NULL',
-                'created_by': 'TEXT',
-                'access_users': 'TEXT',
-                'system_type': 'TEXT DEFAULT "personal"'
-            }
-        }
-        
-        changes_made = False
-        
-        for table_name, expected_columns in expected_schema.items():
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-            
-            if not cursor.fetchone():
-                print(f"Tabelle {table_name} in users.db existiert nicht - wird erstellt")
-                if table_name == 'users':
-                    cursor.execute('''CREATE TABLE IF NOT EXISTS users
-                                     (id TEXT PRIMARY KEY, name TEXT NOT NULL)''')
-                elif table_name == 'lager':
-                    cursor.execute('''CREATE TABLE IF NOT EXISTS lager
-                                     (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_by TEXT,
-                                       access_users TEXT, system_type TEXT DEFAULT 'personal')''')
-                conn.commit()
-                changes_made = True
-                continue
-            
-            current_columns = get_table_columns(conn, table_name)
-            
-            for column_name, column_type in expected_columns.items():
-                if column_name not in current_columns:
-                    print(f"Fehlende Spalte in users.db erkannt: {table_name}.{column_name}")
-                    
-                    default_value = None
-                    if 'DEFAULT' in column_type:
-                        parts = column_type.split('DEFAULT')
-                        column_type = parts[0].strip()
-                        default_value = parts[1].strip().strip("'\"")
-                        default_value = f"'{default_value}'"
-                    
-                    if add_missing_column(conn, table_name, column_name, column_type, default_value):
-                        changes_made = True
-        
-        if changes_made:
-            print("Migration für users.db abgeschlossen")
-        else:
-            print("Keine Änderungen für users.db erforderlich")
-            
-    except Exception as e:
-        print(f"Fehler bei der users.db Migration: {e}")
-    finally:
-        conn.close()
-
-def auto_migrate_all_databases():
-    """Automatically check and migrate all databases"""
-    print("=== Starte automatische Datenbank-Migration ===")
-    
-    # Migriere users.db
-    check_and_migrate_users_db()
-    
-    # Finde alle Lager-Datenbanken
-    for file in os.listdir('.'):
-        if file.endswith('.db') and file != 'users.db':
-            lager_id = file[:-3]  # Entferne .db
-            print(f"\nPrüfe Lager-Datenbank: {lager_id}")
-            check_and_migrate_warehouse_db(lager_id)
-    
-    print("\n=== Migration abgeschlossen ===")
 
 def migrate_warehouse_db(lager_id):
-       check_and_migrate_warehouse_db(lager_id)
+    create_warehouse_db(lager_id)
 
 def generate_random_id(length=6):
     return ''.join(random.choices(string.digits, k=length))
 
 def get_db_connection(lager_id):
-    return sqlite3.connect(f'{lager_id}.db')
+    return get_lager_conn(lager_id)
 
 def generate_qr_code(data):
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -659,7 +742,7 @@ def generate_qr_code(data):
     return f"data:image/png;base64,{img_str}"
 
 def get_lager_system_type(lager_id):
-    conn = sqlite3.connect('users.db')
+    conn = get_users_conn()
     c = conn.cursor()
     c.execute("SELECT system_type FROM lager WHERE id = ?", (lager_id,))
     result = c.fetchone()
@@ -668,122 +751,1074 @@ def get_lager_system_type(lager_id):
 
 
 def backup_db(lager_id, operation):
-    os.makedirs('backups', exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    shutil.copy(f'{lager_id}.db', f'backups/{timestamp}_{operation}_{lager_id}.db')
+    # MySQL/MariaDB data is managed by the database server; no file copy needed.
+    return None
 
-@app.route('/')
+
+def _read_uploaded_device_image(upload):
+    if not upload or not upload.filename:
+        return None, None
+    raw = upload.stream.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024:
+        raise ValueError('Das Bild darf höchstens 8 MB groß sein.')
+    try:
+        with PILImage.open(BytesIO(raw)) as source:
+            if source.format not in ('JPEG', 'PNG', 'WEBP'):
+                raise ValueError('Erlaubte Bildformate sind JPG, PNG und WebP.')
+            source.verify()
+        with PILImage.open(BytesIO(raw)) as source:
+            source = source.convert('RGB')
+            source.thumbnail((1400, 1400))
+            output = BytesIO()
+            source.save(output, format='JPEG', quality=86, optimize=True)
+            return 'image/jpeg', output.getvalue()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError('Die Bilddatei konnte nicht gelesen werden.') from exc
+
+
+def _parse_dmx_channel_map(form):
+    channels = form.getlist('dmx_channel')
+    functions = form.getlist('dmx_function')
+    mapping = []
+    seen = set()
+    for raw_channel, raw_function in zip(channels, functions):
+        raw_channel = (raw_channel or '').strip()
+        raw_function = (raw_function or '').strip()
+        if not raw_channel and not raw_function:
+            continue
+        try:
+            channel = int(raw_channel)
+        except (TypeError, ValueError):
+            raise ValueError('Jede DMX-Funktion benötigt eine gültige Kanalnummer von 1 bis 512.')
+        if not 1 <= channel <= 512:
+            raise ValueError('DMX-Kanalnummern müssen zwischen 1 und 512 liegen.')
+        if channel in seen:
+            raise ValueError(f'DMX-Kanal {channel} ist mehrfach eingetragen.')
+        if not raw_function:
+            raise ValueError(f'Für DMX-Kanal {channel} fehlt die Funktion.')
+        if len(raw_function) > 100:
+            raise ValueError('Eine DMX-Funktionsbeschreibung darf höchstens 100 Zeichen lang sein.')
+        seen.add(channel)
+        mapping.append({'channel': channel, 'function': raw_function})
+    return json.dumps(sorted(mapping, key=lambda item: item['channel']), ensure_ascii=False) if mapping else None
+
+
+def _decode_dmx_channel_map(raw_value):
+    if not raw_value:
+        return []
+    try:
+        mapping = json.loads(raw_value)
+        if isinstance(mapping, list):
+            cleaned = []
+            for entry in mapping:
+                if not isinstance(entry, dict) or not isinstance(entry.get('function'), str):
+                    continue
+                try:
+                    channel = int(entry.get('channel'))
+                except (TypeError, ValueError):
+                    continue
+                if 1 <= channel <= 512:
+                    cleaned.append({'channel': channel, 'function': entry['function'][:100]})
+            return sorted(cleaned, key=lambda item: item['channel'])
+    except (TypeError, ValueError):
+        pass
+    return []
+
+@app.route('/', methods=['GET', 'POST'])
 def login():
+    if request.method == 'POST':
+        user_id = (request.form.get('user_id') or '').strip()
+        password = request.form.get('password') or ''
+        conn = get_users_conn()
+        c = conn.cursor()
+        c.execute("SELECT name, password, role FROM users WHERE id = %s", (user_id,))
+        user = c.fetchone()
+        conn.close()
+        if user:
+            stored = user[1]
+            if stored:
+                try:
+                    valid = check_password_hash(stored, password)
+                except Exception:
+                    valid = False
+            else:
+                valid = True
+            if valid:
+                session.clear()
+                session['user_id'] = user_id
+                session['user_name'] = user[0]
+                session['role'] = user[2] or 'user'
+                return redirect(url_for('dashboard'))
+        return redirect(url_for('login'))
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     return render_template('login.html', title="Login")
 
-@app.route('/login', methods=['POST'])
-def do_login():
-    user_id = request.form['user_id']
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("SELECT name FROM users WHERE id = ?", (user_id,))
-    user = c.fetchone()
-    conn.close()
-    if user:
-        session['user_id'] = user_id
-        session['user_name'] = user[0]
-        return redirect(url_for('dashboard'))
-    else:
-        return redirect(url_for('login'))
 
-@app.route('/dashboard')
+@app.route('/login', methods=['GET', 'POST'])
+def do_login():
+    return login()
+
+@app.route('/dashboard', methods=['GET', 'POST'])
 def dashboard():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    conn = sqlite3.connect('users.db')
+    conn = get_users_conn()
     c = conn.cursor()
-    c.execute("SELECT id, name FROM lager WHERE created_by = ? OR access_users LIKE ?",
-              (session['user_id'], f"%{session['user_id']}%"))
+    c.execute("SELECT id, name FROM lager WHERE created_by = ? OR FIND_IN_SET(?, access_users) > 0 ORDER BY name",
+              (session['user_id'], session['user_id']))
     lagers = c.fetchall()
     conn.close()
-    return render_template('dashboard.html', title="Dashboard", lagers=lagers, update_available=UPDATE_AVAILABLE, latest_version=LATEST_VERSION, current_version=VERSION)
+    events = get_user_events(session['user_id'], limit=6)
+    return render_template('dashboard.html', title="Dashboard", lagers=lagers, events=events,
+                           is_admin=is_admin(), update_available=UPDATE_AVAILABLE,
+                           latest_version=LATEST_VERSION, current_version=VERSION)
+
 
 @app.route('/create_lager', methods=['GET', 'POST'])
 def create_lager():
     if 'user_id' not in session:
         return redirect(url_for('login'))
+    if not is_admin():
+        return redirect(url_for('dashboard'))
     if request.method == 'POST':
-        name = request.form['name']
+        name = request.form['name'].strip()
         access_users = request.form.getlist('access_users')
+        if session['user_id'] not in access_users:
+            access_users.append(session['user_id'])
         system_type = request.form.get('system_type', 'personal')
         lager_id = generate_random_id(8)
-        while os.path.exists(f'{lager_id}.db'):
-            lager_id = generate_random_id(8)
-        conn = sqlite3.connect('users.db')
+        conn = get_users_conn()
         c = conn.cursor()
-        c.execute("INSERT INTO lager VALUES (?, ?, ?, ?, ?)", 
+        while True:
+            c.execute("SELECT id FROM lager WHERE id = ?", (lager_id,))
+            if not c.fetchone():
+                break
+            lager_id = generate_random_id(8)
+        c.execute("INSERT INTO lager (id, name, created_by, access_users, system_type) VALUES (?, ?, ?, ?, ?)",
                   (lager_id, name, session['user_id'], ','.join(access_users), system_type))
         conn.commit()
         conn.close()
         create_warehouse_db(lager_id)
         return redirect(url_for('warehouse', lager_id=lager_id))
-    conn = sqlite3.connect('users.db')
+    conn = get_users_conn()
     c = conn.cursor()
-    c.execute("SELECT id, name FROM users WHERE id != ?", (session['user_id'],))
+    c.execute("SELECT id, name FROM users ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, name",
+              (session['user_id'],))
     users = c.fetchall()
     conn.close()
     return render_template('create_lager.html', title="Neues Lager", users=users)
+
 
 @app.route('/lager/<lager_id>')
 def warehouse(lager_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    if not os.path.exists(f'{lager_id}.db'):
-        return redirect(url_for('dashboard'))
 
-    migrate_warehouse_db(lager_id)
-
-    conn = sqlite3.connect('users.db')
+    conn = get_users_conn()
     c = conn.cursor()
-    c.execute("SELECT id FROM lager WHERE id = ? AND (created_by = ? OR access_users LIKE ?)",
-              (lager_id, session['user_id'], f"%{session['user_id']}%"))
+    if is_admin():
+        c.execute("SELECT id FROM lager WHERE id = ?", (lager_id,))
+    else:
+        c.execute("SELECT id FROM lager WHERE id = ? AND (created_by = ? OR FIND_IN_SET(?, access_users) > 0)",
+                  (lager_id, session['user_id'], session['user_id']))
     has_access = c.fetchone()
     conn.close()
 
     if not has_access:
         return redirect(url_for('dashboard'))
 
+    create_warehouse_db(lager_id)
     session['current_lager'] = lager_id
     return render_template('warehouse.html', title="Lager", lager_id=lager_id)
+
+
+@app.route('/cases')
+def cases():
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+
+    create_warehouse_db(session['current_lager'])
+    search = (request.args.get('search') or '').strip()
+    conn = get_db_connection(session['current_lager'])
+    c = conn.cursor()
+    query = """SELECT c.id, c.name, c.barcode, c.beschreibung, c.lagerplatz, c.lagerort,
+                      COUNT(cd.geraet_id), COALESCE(SUM(g.quantity), 0), c.status, c.case_type
+               FROM cases c
+               LEFT JOIN case_devices cd ON cd.case_id = c.id
+               LEFT JOIN geraete g ON g.id = cd.geraet_id
+               WHERE 1=1"""
+    params = []
+    if search:
+        query += " AND (c.name LIKE ? OR c.barcode LIKE ? OR c.case_type LIKE ? OR c.beschreibung LIKE ?)"
+        params.extend([f'%{search}%'] * 4)
+    query += """ GROUP BY c.id, c.name, c.barcode, c.beschreibung, c.lagerplatz, c.lagerort,
+                         c.status, c.case_type
+                 ORDER BY c.name"""
+    c.execute(query, params)
+    case_list = c.fetchall()
+    c.execute("SELECT COALESCE(SUM(quantity), 0) FROM geraete")
+    total_devices = c.fetchone()[0]
+    c.execute("""SELECT COALESCE(SUM(g.quantity), 0)
+                 FROM case_devices cd
+                 JOIN geraete g ON g.id = cd.geraet_id""")
+    assigned_devices = c.fetchone()[0]
+    conn.close()
+
+    return render_template('cases.html', title="Cases", cases=case_list,
+                           total_devices=total_devices, assigned_devices=assigned_devices,
+                           search=search, case_types=CASE_TYPE_VALUES)
+
+
+@app.route('/cases/create', methods=['POST'])
+def create_case():
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+
+    name = (request.form.get('name') or '').strip()
+    beschreibung = (request.form.get('beschreibung') or '').strip()
+    lagerplatz = (request.form.get('lagerplatz') or '').strip()
+    lagerort = (request.form.get('lagerort') or '').strip()
+    status = request.form.get('status')
+    if status not in CASE_STATUS_VALUES:
+        status = 'verfügbar'
+    case_type = request.form.get('case_type') or 'Case'
+    if case_type not in CASE_TYPE_VALUES:
+        case_type = 'Case'
+    if not name:
+        flash('Ein Name für den Case ist erforderlich.')
+        return redirect(url_for('cases'))
+
+    conn = get_db_connection(session['current_lager'])
+    c = conn.cursor()
+    barcode = (request.form.get('barcode') or '').strip()
+    if not barcode:
+        while True:
+            barcode = generate_random_id(6)
+            c.execute("SELECT id FROM cases WHERE barcode = ?", (barcode,))
+            if not c.fetchone():
+                break
+    c.execute("INSERT INTO cases (name, barcode, beschreibung, lagerplatz, lagerort, status, case_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (name, barcode, beschreibung, lagerplatz, lagerort, status, case_type))
+    conn.commit()
+    conn.close()
+    flash(f'Case „{name}" wurde angelegt.')
+    return redirect(url_for('cases'))
+
+
+@app.route('/cases/<int:case_id>')
+def case_detail(case_id):
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+
+    create_warehouse_db(session['current_lager'])
+    conn = get_db_connection(session['current_lager'])
+    c = conn.cursor()
+    c.execute("SELECT id, name, barcode, beschreibung, lagerplatz, lagerort, status, case_type FROM cases WHERE id = ?", (case_id,))
+    case = c.fetchone()
+    if not case:
+        conn.close()
+        return redirect(url_for('cases'))
+
+    c.execute("""SELECT g.id, g.name, g.barcode, g.lagerplatz, g.status,
+                        cd.case_id, other.name, g.quantity
+                 FROM geraete g
+                 LEFT JOIN case_devices cd ON cd.geraet_id = g.id
+                 LEFT JOIN cases other ON other.id = cd.case_id
+                 ORDER BY CASE
+                     WHEN cd.case_id IS NULL THEN 0
+                     WHEN cd.case_id = ? THEN 1
+                     ELSE 2
+                 END, g.name""", (case_id,))
+    devices = c.fetchall()
+    conn.close()
+
+    return render_template('case_detail.html', title=case[1], case=case, devices=devices,
+                           case_types=CASE_TYPE_VALUES)
+
+
+@app.route('/cases/<int:case_id>/assign', methods=['POST'])
+def assign_case_devices(case_id):
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+
+    selected = set()
+    for value in request.form.getlist('device_ids'):
+        try:
+            selected.add(int(value))
+        except (TypeError, ValueError):
+            continue
+
+    conn = get_db_connection(session['current_lager'])
+    c = conn.cursor()
+    c.execute("SELECT id, name FROM cases WHERE id = ?", (case_id,))
+    case = c.fetchone()
+    if not case:
+        conn.close()
+        return redirect(url_for('cases'))
+
+    c.execute("SELECT geraet_id FROM case_devices WHERE case_id = ?", (case_id,))
+    current = {row[0] for row in c.fetchall()}
+
+    for geraet_id in current - selected:
+        c.execute("DELETE FROM case_devices WHERE case_id = ? AND geraet_id = ?", (case_id, geraet_id))
+
+    for geraet_id in selected - current:
+        c.execute("SELECT case_id FROM case_devices WHERE geraet_id = ?", (geraet_id,))
+        if c.fetchone():
+            continue
+        c.execute("INSERT INTO case_devices (case_id, geraet_id) VALUES (?, ?)", (case_id, geraet_id))
+
+    conn.commit()
+    conn.close()
+    flash(f'Zuweisung für Case „{case[1]}" gespeichert.')
+    return redirect(url_for('case_detail', case_id=case_id))
+
+
+@app.route('/cases/<int:case_id>/edit', methods=['POST'])
+def edit_case(case_id):
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+
+    name = (request.form.get('name') or '').strip()
+    beschreibung = (request.form.get('beschreibung') or '').strip()
+    lagerplatz = (request.form.get('lagerplatz') or '').strip()
+    lagerort = (request.form.get('lagerort') or '').strip()
+    status = request.form.get('status')
+    case_type = request.form.get('case_type')
+    if name:
+        conn = get_db_connection(session['current_lager'])
+        c = conn.cursor()
+        if status not in CASE_STATUS_VALUES or case_type not in CASE_TYPE_VALUES:
+            c.execute("SELECT status, case_type FROM cases WHERE id = ?", (case_id,))
+            row = c.fetchone()
+            if status not in CASE_STATUS_VALUES:
+                status = row[0] if row and row[0] else 'verfügbar'
+            if case_type not in CASE_TYPE_VALUES:
+                case_type = row[1] if row and row[1] else 'Case'
+        if status not in CASE_STATUS_VALUES:
+            status = 'verfügbar'
+        if case_type not in CASE_TYPE_VALUES:
+            case_type = 'Case'
+        c.execute("UPDATE cases SET name = ?, beschreibung = ?, lagerplatz = ?, lagerort = ?, status = ?, case_type = ? WHERE id = ?",
+                  (name, beschreibung, lagerplatz, lagerort, status, case_type, case_id))
+        conn.commit()
+        conn.close()
+    return redirect(url_for('case_detail', case_id=case_id))
+
+
+@app.route('/cases/<int:case_id>/delete', methods=['POST'])
+def delete_case(case_id):
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+
+    conn = get_db_connection(session['current_lager'])
+    c = conn.cursor()
+    c.execute("DELETE FROM case_devices WHERE case_id = ?", (case_id,))
+    c.execute("DELETE FROM cases WHERE id = ?", (case_id,))
+    conn.commit()
+    conn.close()
+    flash('Case wurde gelöscht.')
+    return redirect(url_for('cases'))
+
+
+@app.route('/events')
+def events():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    event_list = get_user_events(session['user_id'])
+    return render_template('events.html', title="Events", events=event_list)
+
+
+@app.route('/events/create', methods=['GET', 'POST'])
+def event_create():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    lagers = get_accessible_lagers(session['user_id'], is_admin())
+    if request.method == 'POST':
+        return save_event(None, lagers)
+
+    return render_template('event_form.html', title="Neues Event", mode='create', event=None,
+                           lagers=lagers, selected_lager_ids=[], selected_case_ids=[],
+                           selected_devices={}, contacts=[])
+
+
+@app.route('/events/<int:event_id>/edit', methods=['GET', 'POST'])
+def event_edit(event_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_can_edit(event_id, session['user_id']):
+        flash('Du hast keine Berechtigung, dieses Event zu bearbeiten.')
+        return redirect(url_for('events'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("""SELECT id, name, organizer, description, lager_id, start_at, end_at, created_by, created_at
+                 FROM events WHERE id = ?""", (event_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return redirect(url_for('events'))
+
+    event = {
+        'id': row[0], 'name': row[1], 'organizer': row[2], 'description': row[3],
+        'lager_id': row[4], 'start_at': str(row[5]) if row[5] else None,
+        'end_at': str(row[6]) if row[6] else None,
+        'created_by': row[7], 'created_at': str(row[8]) if row[8] else None,
+    }
+    c.execute("SELECT lager_id FROM event_lagers WHERE event_id = ?", (event_id,))
+    selected_lager_ids = [r[0] for r in c.fetchall()] or [event['lager_id']]
+    c.execute("SELECT lager_id, case_id FROM event_cases WHERE event_id = ?", (event_id,))
+    selected_case_ids = [f"{r[0]}:{r[1]}" for r in c.fetchall()]
+    c.execute("SELECT lager_id, device_id, quantity FROM event_devices WHERE event_id = ?", (event_id,))
+    selected_devices = {f"{r[0]}:{r[1]}": r[2] for r in c.fetchall()}
+    c.execute("SELECT name, email FROM event_contacts WHERE event_id = ? ORDER BY id", (event_id,))
+    contacts = [{'name': r[0], 'email': r[1]} for r in c.fetchall()]
+    conn.close()
+
+    lagers = get_accessible_lagers(session['user_id'], is_admin())
+    if request.method == 'POST':
+        return save_event(event_id, lagers)
+
+    return render_template('event_form.html', title="Event bearbeiten", mode='edit', event=event,
+                           lagers=lagers, selected_lager_ids=selected_lager_ids,
+                           selected_case_ids=selected_case_ids, selected_devices=selected_devices,
+                           contacts=contacts)
+
+
+def save_event(event_id, lagers):
+    name = (request.form.get('name') or '').strip()
+    lager_ids = list(dict.fromkeys(value.strip() for value in request.form.getlist('lager_ids') if value.strip()))
+    lager_id = lager_ids[0] if lager_ids else ''
+    organizer = (request.form.get('organizer') or '').strip()
+    description = (request.form.get('description') or '').strip()
+    start_at = parse_event_datetime(request.form.get('start_at'))
+    end_at = parse_event_datetime(request.form.get('end_at'))
+
+    if start_at and end_at and end_at < start_at:
+        flash('Das Event-Ende muss nach dem Beginn liegen.', 'error')
+        return redirect(request.url)
+
+    if not name:
+        flash('Ein Veranstaltungsname ist erforderlich.')
+        return redirect(request.url)
+    accessible_ids = {str(row[0]) for row in lagers}
+    if not lager_ids or any(value not in accessible_ids for value in lager_ids):
+        flash('Bitte wähle mindestens ein Lager aus, auf das du Zugriff hast.')
+        return redirect(request.url)
+
+    selected_case_ids = []
+    selected_devices = []
+    all_case_ids = set()
+    device_map_by_lager = {}
+    cases_by_lager = {}
+    for selected_lager_id in lager_ids:
+        cases, devices = load_event_lager_data(selected_lager_id)
+        cases_by_lager[selected_lager_id] = cases
+        device_map_by_lager[selected_lager_id] = {device['id']: device for device in devices}
+        all_case_ids.update((selected_lager_id, case['id']) for case in cases)
+
+    for value in request.form.getlist('case_ids'):
+        try:
+            selected_lager_id, case_id_text = value.rsplit(':', 1)
+            case_id = int(case_id_text)
+        except (ValueError, TypeError):
+            continue
+        pair = (selected_lager_id, case_id)
+        if selected_lager_id in lager_ids and pair in all_case_ids and pair not in selected_case_ids:
+            selected_case_ids.append(pair)
+
+    seen_devices = set()
+    for value in request.form.getlist('device_ids'):
+        try:
+            selected_lager_id, device_id_text = value.rsplit(':', 1)
+            device_id = int(device_id_text)
+        except (ValueError, TypeError):
+            continue
+        device_map = device_map_by_lager.get(selected_lager_id, {})
+        pair = (selected_lager_id, device_id)
+        if pair in seen_devices or device_id not in device_map:
+            continue
+        seen_devices.add(pair)
+        device = device_map[device_id]
+        try:
+            quantity = int(request.form.get(f'quantity_{selected_lager_id}_{device_id}') or device['quantity'])
+        except (TypeError, ValueError):
+            quantity = device['quantity']
+        quantity = max(1, min(quantity, device['quantity']))
+        selected_devices.append((selected_lager_id, device_id, device['case_id'], quantity))
+
+    # Devices inside selected cases are automatically included.
+    for selected_lager_id, case_id in selected_case_ids:
+        case_item = next((item for item in cases_by_lager[selected_lager_id] if item['id'] == case_id), None)
+        if not case_item:
+            continue
+        for device_id in case_item['device_ids']:
+            pair = (selected_lager_id, device_id)
+            if pair in seen_devices:
+                continue
+            device = device_map_by_lager[selected_lager_id].get(device_id)
+            if device:
+                seen_devices.add(pair)
+                selected_devices.append((selected_lager_id, device_id, case_id, device['quantity']))
+
+    contacts = []
+    contact_names = request.form.getlist('contact_name')
+    contact_emails = request.form.getlist('contact_email')
+    for index, contact_name in enumerate(contact_names):
+        contact_name = (contact_name or '').strip()
+        contact_email = (contact_emails[index] if index < len(contact_emails) else '').strip()
+        if contact_name:
+            contacts.append((contact_name, contact_email or None))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+
+    old_assignments = {}
+    if event_id:
+        c.execute("SELECT lager_id, device_id FROM event_devices WHERE event_id = ?", (event_id,))
+        for old_lager, old_id in c.fetchall():
+            old_assignments.setdefault(old_lager, {'devices': set(), 'cases': set()})['devices'].add(old_id)
+        c.execute("SELECT lager_id, case_id FROM event_cases WHERE event_id = ?", (event_id,))
+        for old_lager, old_id in c.fetchall():
+            old_assignments.setdefault(old_lager, {'devices': set(), 'cases': set()})['cases'].add(old_id)
+
+    conflicts = []
+    conflicting_devices = set()
+    conflicting_cases = set()
+    for selected_lager_id, device_id, _, requested_quantity in selected_devices:
+        device = device_map_by_lager[selected_lager_id][device_id]
+        if device['status'] == 'defekt':
+            conflicts.append(f"Gerät „{device['name']}\" ist defekt und wurde nicht eingeplant.")
+            conflicting_devices.add((selected_lager_id, device_id))
+        elif active_borrow_quantity(selected_lager_id, device_id) + requested_quantity > device['quantity']:
+            conflicts.append(f"Gerät „{device['name']}\" ist derzeit teilweise oder vollständig ausgeliehen; die angeforderte Menge wurde ausgelassen.")
+            conflicting_devices.add((selected_lager_id, device_id))
+        elif event_assignment_conflicts(selected_lager_id, device_id, 'device', start_at, end_at, event_id):
+            conflicts.append(f"Gerät „{device['name']}\" ist bereits in einem zeitlich überschneidenden Event eingeplant und wurde ausgelassen.")
+            conflicting_devices.add((selected_lager_id, device_id))
+    for selected_lager_id, case_id in selected_case_ids:
+        case_item = next((item for item in cases_by_lager[selected_lager_id] if item['id'] == case_id), None)
+        if not case_item:
+            continue
+        defective_devices = [device_map_by_lager[selected_lager_id][device_id]['name']
+                             for device_id in case_item['device_ids']
+                             if device_id in device_map_by_lager[selected_lager_id]
+                             and device_map_by_lager[selected_lager_id][device_id]['status'] == 'defekt']
+        if case_item['status'] == 'defekt' or defective_devices:
+            if defective_devices:
+                conflicts.append(f"Case „{case_item['name']}\" enthält defekte Geräte ({', '.join(defective_devices)}) und wurde nicht eingeplant.")
+            else:
+                conflicts.append(f"Case „{case_item['name']}\" ist defekt und wurde nicht eingeplant.")
+            conflicting_cases.add((selected_lager_id, case_id))
+        elif event_assignment_conflicts(selected_lager_id, case_id, 'case', start_at, end_at, event_id):
+            conflicts.append(f"Case „{case_item['name']}\" ist bereits in einem zeitlich überschneidenden Event eingeplant und wurde ausgelassen.")
+            conflicting_cases.add((selected_lager_id, case_id))
+
+    # Keep the event and all non-conflicting inventory when one selected item
+    # is unavailable, instead of losing the whole submitted form.
+    selected_case_ids = [pair for pair in selected_case_ids if pair not in conflicting_cases]
+    selected_devices = [item for item in selected_devices
+                        if (item[0], item[1]) not in conflicting_devices
+                        and (item[0], item[2]) not in conflicting_cases]
+
+    if event_id:
+        c.execute("""UPDATE events SET name = ?, organizer = ?, description = ?, lager_id = ?,
+                     start_at = ?, end_at = ? WHERE id = ?""",
+                  (name, organizer or None, description or None, lager_id,
+                   start_at, end_at, event_id))
+    else:
+        c.execute("""INSERT INTO events (name, organizer, description, lager_id, start_at, end_at, created_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (name, organizer or None, description or None, lager_id,
+                   start_at, end_at, session['user_id']))
+        event_id = c.lastrowid
+        c.execute("INSERT INTO event_permissions (event_id, user_id, role) VALUES (?, ?, 'host')",
+                  (event_id, session['user_id']))
+
+    c.execute("DELETE FROM event_cases WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_devices WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_lagers WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_contacts WHERE event_id = ?", (event_id,))
+
+    for selected_lager_id in lager_ids:
+        c.execute("INSERT INTO event_lagers (event_id, lager_id) VALUES (?, ?)", (event_id, selected_lager_id))
+    for selected_lager_id, case_id in selected_case_ids:
+        c.execute("INSERT INTO event_cases (event_id, lager_id, case_id) VALUES (?, ?, ?)",
+                  (event_id, selected_lager_id, case_id))
+    for selected_lager_id, device_id, case_id, quantity in selected_devices:
+        c.execute("INSERT INTO event_devices (event_id, lager_id, device_id, case_id, quantity) VALUES (?, ?, ?, ?, ?)",
+                  (event_id, selected_lager_id, device_id, case_id, quantity))
+    for contact_name, contact_email in contacts:
+        c.execute("INSERT INTO event_contacts (event_id, name, email) VALUES (?, ?, ?)",
+                  (event_id, contact_name, contact_email))
+
+    conn.commit()
+    conn.close()
+
+    new_assignments = {}
+    for selected_lager_id, device_id, _, _ in selected_devices:
+        new_assignments.setdefault(selected_lager_id, {'devices': set(), 'cases': set()})['devices'].add(device_id)
+    for selected_lager_id, case_id in selected_case_ids:
+        new_assignments.setdefault(selected_lager_id, {'devices': set(), 'cases': set()})['cases'].add(case_id)
+    for selected_lager_id in set(old_assignments) | set(new_assignments):
+        old_items = old_assignments.get(selected_lager_id, {'devices': set(), 'cases': set()})
+        new_items = new_assignments.get(selected_lager_id, {'devices': set(), 'cases': set()})
+        refresh_event_item_statuses(selected_lager_id, old_items['devices'] | new_items['devices'],
+                                    old_items['cases'] | new_items['cases'])
+
+    flash(f'Event „{name}" wurde gespeichert.')
+    for message in conflicts[:8]:
+        flash(message, 'error')
+    if len(conflicts) > 8:
+        flash(f'Weitere {len(conflicts) - 8} nicht verfügbare Position(en) wurden ausgelassen.', 'error')
+    return redirect(url_for('event_detail', event_id=event_id))
+
+
+@app.route('/events/<int:event_id>')
+def event_detail(event_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    role = get_event_role(event_id, session['user_id'])
+    if not role:
+        flash('Du hast keinen Zugriff auf dieses Event.')
+        return redirect(url_for('events'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("""SELECT id, name, organizer, description, lager_id, start_at, end_at, created_by, created_at
+                 FROM events WHERE id = ?""", (event_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return redirect(url_for('events'))
+
+    event = {
+        'id': row[0], 'name': row[1], 'organizer': row[2], 'description': row[3],
+        'lager_id': row[4], 'start_at': str(row[5]) if row[5] else None,
+        'end_at': str(row[6]) if row[6] else None,
+        'created_by': row[7], 'created_at': str(row[8]) if row[8] else None,
+    }
+    c.execute("SELECT name, email FROM event_contacts WHERE event_id = ? ORDER BY id", (event_id,))
+    contacts = [{'name': r[0], 'email': r[1]} for r in c.fetchall()]
+    c.execute("SELECT lager_id FROM event_lagers WHERE event_id = ?", (event_id,))
+    event_lager_ids = [r[0] for r in c.fetchall()] or [event['lager_id']]
+    c.execute("SELECT lager_id, case_id FROM event_cases WHERE event_id = ?", (event_id,))
+    selected_case_rows = c.fetchall()
+    c.execute("SELECT lager_id, device_id, case_id, quantity FROM event_devices WHERE event_id = ?", (event_id,))
+    selected_device_rows = c.fetchall()
+    c.execute("""SELECT ep.user_id, u.name, ep.role
+                 FROM event_permissions ep
+                 LEFT JOIN users u ON u.id = ep.user_id
+                 WHERE ep.event_id = ?""", (event_id,))
+    permissions = [{'user_id': r[0], 'name': r[1] or r[0], 'role': r[2]} for r in c.fetchall()]
+    permissions.sort(key=lambda p: (-EVENT_ROLE_RANK.get(p['role'], 0), (p['name'] or '').lower()))
+    c.execute("SELECT id, name FROM users ORDER BY name")
+    users = c.fetchall()
+    c.execute("""SELECT id, filename, mimetype, uploaded_by, created_at
+                 FROM event_attachments WHERE event_id = ? ORDER BY created_at DESC, id DESC""", (event_id,))
+    attachments = [{'id': r[0], 'filename': r[1], 'mimetype': r[2] or '',
+                    'uploaded_by': r[3], 'created_at': str(r[4]) if r[4] else ''}
+                   for r in c.fetchall()]
+    conn.close()
+
+    lager_names = {lager_id: get_lager_name(lager_id) for lager_id in event_lager_ids}
+    cases = []
+    devices = []
+    for lager_id in event_lager_ids:
+        create_warehouse_db(lager_id)
+        lconn = get_db_connection(lager_id)
+        lc = lconn.cursor()
+        lc.execute("SELECT id, name, barcode FROM cases ORDER BY name")
+        all_cases = {r[0]: {'id': r[0], 'name': r[1], 'barcode': r[2]} for r in lc.fetchall()}
+        selected_for_lager = [case_id for case_lager, case_id in selected_case_rows if case_lager == lager_id]
+        for case_id in selected_for_lager:
+            if case_id in all_cases:
+                item = dict(all_cases[case_id])
+                item['lager_name'] = lager_names[lager_id]
+                cases.append(item)
+
+        device_rows = [row for row in selected_device_rows if row[0] == lager_id]
+        device_ids = [row[1] for row in device_rows]
+        device_meta = {}
+        if device_ids:
+            placeholders = ','.join('?' for _ in device_ids)
+            lc.execute(f"SELECT id, name, barcode, quantity FROM geraete WHERE id IN ({placeholders})",
+                       tuple(device_ids))
+            device_meta = {r[0]: {'id': r[0], 'name': r[1], 'barcode': r[2], 'stock_quantity': r[3] or 1}
+                           for r in lc.fetchall()}
+        for _, device_id, case_id, quantity in device_rows:
+            meta = device_meta.get(device_id)
+            if not meta:
+                continue
+            item = dict(meta)
+            item['quantity'] = quantity
+            item['case_name'] = all_cases.get(case_id, {}).get('name') if case_id else None
+            item['lager_name'] = lager_names[lager_id]
+            devices.append(item)
+        lconn.close()
+
+    # In event views, collapse individually tracked copies of the same item.
+    # The inventory still keeps one row and one defect state per physical unit.
+    grouped = {}
+    for item in devices:
+        key = (item['lager_name'], item['name'], item['case_name'] or '')
+        group = grouped.setdefault(key, {**item, 'barcodes': [], 'quantity': 0, 'stock_quantity': 0})
+        if item.get('barcode'):
+            group['barcodes'].append(str(item['barcode']))
+        group['quantity'] += item.get('quantity') or 1
+        group['stock_quantity'] += item.get('stock_quantity') or 1
+    devices = list(grouped.values())
+    for item in devices:
+        item['barcode'] = ', '.join(item.pop('barcodes'))
+
+    return render_template('event_detail.html', title=event['name'], event=event,
+                           contacts=contacts, cases=cases, devices=devices,
+                           permissions=permissions, users=users, groups=get_user_groups(),
+                           attachments=attachments, role=role,
+                           role_label=EVENT_ROLE_LABELS.get(role, role),
+                           can_edit=EVENT_ROLE_RANK.get(role, 0) >= 2,
+                           is_host=role == 'host', lager_name=', '.join(lager_names.values()),
+                           event_lager_names=list(lager_names.values()))
+
+
+@app.route('/events/<int:event_id>/material.pdf')
+def event_material_pdf(event_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_can_view(event_id, session['user_id']):
+        flash('Du hast keinen Zugriff auf dieses Event.')
+        return redirect(url_for('events'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT name, lager_id FROM events WHERE id = ?", (event_id,))
+    event = c.fetchone()
+    if not event:
+        conn.close()
+        return redirect(url_for('events'))
+    c.execute("SELECT lager_id FROM event_lagers WHERE event_id = ?", (event_id,))
+    lager_ids = [row[0] for row in c.fetchall()] or [event[1]]
+    c.execute("SELECT lager_id, case_id FROM event_cases WHERE event_id = ?", (event_id,))
+    selected_cases = c.fetchall()
+    c.execute("SELECT lager_id, device_id, case_id, quantity FROM event_devices WHERE event_id = ?", (event_id,))
+    selected_devices = c.fetchall()
+    conn.close()
+
+    rows = [['IDs / Barcodes', 'Name', 'Anzahl', 'Lagerort / Raum', 'Lagerplatz', 'Ergänzungen', '✓']]
+    grouped_devices = {}
+    for lager_id in lager_ids:
+        # A user may request the PDF directly from an already-open event page.
+        # Ensure this warehouse has the current schema before selecting room fields.
+        create_warehouse_db(lager_id)
+        warehouse_conn = get_db_connection(lager_id)
+        wc = warehouse_conn.cursor()
+        for case_lager, case_id in selected_cases:
+            if case_lager != lager_id:
+                continue
+            wc.execute("SELECT barcode, name, lagerort, lagerplatz FROM cases WHERE id = ?", (case_id,))
+            case_row = wc.fetchone()
+            if case_row:
+                rows.append([case_row[0] or str(case_id), case_row[1], '1', case_row[2] or '', case_row[3] or '', '', ''])
+        for device_lager, device_id, case_id, quantity in selected_devices:
+            if device_lager != lager_id:
+                continue
+            wc.execute("SELECT barcode, name, lagerort, lagerplatz FROM geraete WHERE id = ?", (device_id,))
+            device_row = wc.fetchone()
+            if device_row:
+                group_key = (lager_id, device_row[1], device_row[2] or '', device_row[3] or '')
+                group = grouped_devices.setdefault(group_key, {'ids': [], 'quantity': 0})
+                group['ids'].append(device_row[0] or str(device_id))
+                group['quantity'] += quantity or 1
+        warehouse_conn.close()
+
+    for (_, name, room, shelf), group in grouped_devices.items():
+        rows.append([', '.join(map(str, group['ids'])), name, str(group['quantity']), room, shelf, '', ''])
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=24, leftMargin=24,
+                            topMargin=24, bottomMargin=24)
+    styles = getSampleStyleSheet()
+    escaped_event_name = str(event[0]).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    story = [Paragraph(f"Materialliste – {escaped_event_name}", styles['Title']), Spacer(1, 10)]
+    safe_rows = [[Paragraph(str(value).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'),
+                            styles['BodyText']) for value in row] for row in rows]
+    table = Table(safe_rows, colWidths=[82, 132, 44, 100, 95, 230, 30], repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#263449')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#718096')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#edf2f7')]),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5), ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(table)
+    doc.build(story)
+    buffer.seek(0)
+    return send_file(buffer, mimetype='application/pdf', as_attachment=True,
+                     download_name=f"materialliste_event_{event_id}.pdf")
+
+
+@app.route('/events/<int:event_id>/attachments', methods=['POST'])
+def event_attachment_upload(event_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_can_edit(event_id, session['user_id']):
+        flash('Du hast keine Berechtigung, Anhänge hinzuzufügen.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    upload = request.files.get('attachment')
+    if not upload or not upload.filename:
+        flash('Bitte wähle eine Datei aus.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    filename = secure_filename(upload.filename) or 'anhang'
+    extension = Path(filename).suffix.lower()
+    if extension not in ('.pdf', '.png', '.jpg', '.jpeg', '.webp', '.gif'):
+        flash('Erlaubt sind PDF-, PNG-, JPG-, WEBP- und GIF-Dateien.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    data = upload.read()
+    if not data:
+        flash('Die Datei ist leer.')
+        return redirect(url_for('event_detail', event_id=event_id))
+    if len(data) > 20 * 1024 * 1024:
+        flash('Die Datei darf maximal 20 MB groß sein.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    mimetype = upload.mimetype or 'application/octet-stream'
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("""INSERT INTO event_attachments (event_id, filename, mimetype, data, uploaded_by)
+                 VALUES (?, ?, ?, ?, ?)""",
+              (event_id, filename, mimetype, data, session['user_id']))
+    conn.commit()
+    conn.close()
+    flash(f'Anhang „{filename}" wurde hochgeladen.')
+    return redirect(url_for('event_detail', event_id=event_id))
+
+
+@app.route('/events/<int:event_id>/attachments/<int:attachment_id>')
+def event_attachment(event_id, attachment_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_can_view(event_id, session['user_id']):
+        flash('Du hast keinen Zugriff auf dieses Event.')
+        return redirect(url_for('events'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("""SELECT filename, mimetype, data FROM event_attachments
+                 WHERE id = ? AND event_id = ?""", (attachment_id, event_id))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return '', 404
+    return send_file(BytesIO(row[2]), mimetype=row[1] or 'application/octet-stream',
+                     as_attachment=False, download_name=row[0])
+
+
+@app.route('/events/<int:event_id>/attachments/<int:attachment_id>/delete', methods=['POST'])
+def event_attachment_delete(event_id, attachment_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_can_edit(event_id, session['user_id']):
+        flash('Du hast keine Berechtigung, Anhänge zu löschen.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM event_attachments WHERE id = ? AND event_id = ?", (attachment_id, event_id))
+    conn.commit()
+    conn.close()
+    flash('Anhang wurde gelöscht.')
+    return redirect(url_for('event_detail', event_id=event_id))
+
+
+@app.route('/events/<int:event_id>/permissions', methods=['POST'])
+def event_permissions(event_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_is_host(event_id, session['user_id']):
+        flash('Nur Veranstalter können Freigaben verwalten.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    action = request.form.get('action') or 'add'
+    user_id = (request.form.get('user_id') or '').strip()
+    group_id = (request.form.get('group_id') or '').strip()
+    role = request.form.get('role') or 'viewer'
+    if role not in EVENT_ROLE_LABELS:
+        role = 'viewer'
+
+    conn = get_users_conn()
+    c = conn.cursor()
+
+    if action == 'add' and group_id:
+        c.execute("SELECT name FROM user_groups WHERE id = ?", (group_id,))
+        group = c.fetchone()
+        if not group:
+            conn.close()
+            flash('Gruppe wurde nicht gefunden.')
+            return redirect(url_for('event_detail', event_id=event_id))
+        c.execute("SELECT user_id FROM user_group_members WHERE group_id = ?", (group_id,))
+        member_ids = [row[0] for row in c.fetchall()]
+        added = 0
+        for member_id in member_ids:
+            c.execute("""INSERT IGNORE INTO event_permissions (event_id, user_id, role)
+                         VALUES (?, ?, ?)""", (event_id, member_id, role))
+            added += c.rowcount
+        conn.commit()
+        conn.close()
+        flash(f'Gruppe „{group[0]}" wurde mit {added} Mitglied(ern) freigegeben.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    if action in ('update', 'remove') and user_id:
+        c.execute("SELECT role FROM event_permissions WHERE event_id = ? AND user_id = ?", (event_id, user_id))
+        existing = c.fetchone()
+        if existing and existing[0] == 'host' and (action == 'remove' or role != 'host'):
+            c.execute("SELECT COUNT(*) FROM event_permissions WHERE event_id = ? AND role = 'host'", (event_id,))
+            if c.fetchone()[0] <= 1:
+                conn.close()
+                flash('Der letzte Veranstalter kann nicht entfernt oder herabgestuft werden.')
+                return redirect(url_for('event_detail', event_id=event_id))
+
+    if action == 'remove':
+        c.execute("DELETE FROM event_permissions WHERE event_id = ? AND user_id = ?", (event_id, user_id))
+        flash('Freigabe wurde entfernt.')
+    elif action == 'update':
+        c.execute("UPDATE event_permissions SET role = ? WHERE event_id = ? AND user_id = ?",
+                  (role, event_id, user_id))
+        flash('Freigabe wurde aktualisiert.')
+    else:
+        if not user_id:
+            flash('Bitte wähle einen Benutzer aus.')
+        else:
+            c.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+            if not c.fetchone():
+                flash('Benutzer wurde nicht gefunden.')
+            else:
+                c.execute("SELECT role FROM event_permissions WHERE event_id = ? AND user_id = ?",
+                          (event_id, user_id))
+                current_permission = c.fetchone()
+                if current_permission and current_permission[0] == 'host' and role != 'host':
+                    c.execute("SELECT COUNT(*) FROM event_permissions WHERE event_id = ? AND role = 'host'", (event_id,))
+                    if c.fetchone()[0] <= 1:
+                        conn.close()
+                        flash('Der letzte Veranstalter kann nicht herabgestuft werden.')
+                        return redirect(url_for('event_detail', event_id=event_id))
+                c.execute("""INSERT INTO event_permissions (event_id, user_id, role) VALUES (?, ?, ?)
+                             ON DUPLICATE KEY UPDATE role = VALUES(role)""",
+                          (event_id, user_id, role))
+                flash('Freigabe wurde gespeichert.')
+
+    conn.commit()
+    conn.close()
+    return redirect(url_for('event_detail', event_id=event_id))
+
+
+@app.route('/events/<int:event_id>/delete', methods=['POST'])
+def event_delete(event_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_is_host(event_id, session['user_id']):
+        flash('Nur Veranstalter können dieses Event löschen.')
+        return redirect(url_for('event_detail', event_id=event_id))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT lager_id, device_id FROM event_devices WHERE event_id = ?", (event_id,))
+    device_rows = c.fetchall()
+    c.execute("SELECT lager_id, case_id FROM event_cases WHERE event_id = ?", (event_id,))
+    case_rows = c.fetchall()
+    c.execute("DELETE FROM event_devices WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_cases WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_contacts WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_attachments WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_permissions WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM event_lagers WHERE event_id = ?", (event_id,))
+    c.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    conn.commit()
+    conn.close()
+
+    assignments = {}
+    for lager_id, device_id in device_rows:
+        assignments.setdefault(lager_id, {'devices': set(), 'cases': set()})['devices'].add(device_id)
+    for lager_id, case_id in case_rows:
+        assignments.setdefault(lager_id, {'devices': set(), 'cases': set()})['cases'].add(case_id)
+    for lager_id, items in assignments.items():
+        refresh_event_item_statuses(lager_id, items['devices'], items['cases'])
+
+    flash('Event wurde gelöscht.')
+    return redirect(url_for('events'))
+
+
+@app.route('/events/lager/<lager_id>/data')
+def event_lager_data(lager_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Nicht angemeldet'}), 401
+    if not user_has_lager_access(lager_id, session['user_id'], is_admin()):
+        return jsonify({'error': 'Kein Zugriff auf dieses Lager'}), 403
+
+    cases, devices = load_event_lager_data(lager_id)
+    return jsonify({'cases': cases, 'devices': devices})
+
 
 @app.route('/devices')
 def devices():
     if 'current_lager' not in session:
         return redirect(url_for('dashboard'))
+    create_warehouse_db(session['current_lager'])
     
     search = request.args.get('search', '')
     status_filters = [f for f in request.args.getlist('status') if f]
     art_filters = [f for f in request.args.getlist('art') if f]
-    klasse_filters = [f for f in request.args.getlist('klasse') if f]
+    klasse_filters = [f for f in request.args.getlist('lagerort') if f]
     sort_by = request.args.get('sort_by', 'name')
     group_by = request.args.get('group_by', 'none')  
     
     conn = get_db_connection(session['current_lager'])
     c = conn.cursor()
     
-    query = """SELECT DISTINCT g.* FROM geraete g
-               LEFT JOIN ausleih_details ad ON g.id = ad.geraet_id
-               LEFT JOIN ausleihen a ON ad.ausleih_id = a.ausleih_id AND a.status = 'ausgeliehen'
+    query = """SELECT DISTINCT g.id, g.name, g.barcode, g.lagerplatz, g.status, g.beschreibung,
+                      g.seriennummer, g.modell, g.instrumentenart, g.inventarnummer, g.kaufdatum,
+                      g.preis, g.quantity, g.hersteller, g.lagerort, g.mietpreis,
+                      g.dmx_universum, g.dmx_startadresse, g.dmx_kanaele, g.dmx_belegung, g.bild_mimetype
+               FROM geraete g
+               LEFT JOIN (
+                    SELECT ad.geraet_id,
+                           GROUP_CONCAT(DISTINCT a.mitarbeiter_name SEPARATOR ', ') AS mitarbeiter_name,
+                           GROUP_CONCAT(DISTINCT a.zielort SEPARATOR ', ') AS zielort,
+                           MIN(a.datum) AS datum,
+                           GROUP_CONCAT(DISTINCT a.email SEPARATOR ', ') AS email,
+                           GROUP_CONCAT(DISTINCT a.klasse SEPARATOR ', ') AS klasse
+                    FROM ausleih_details ad JOIN ausleihen a ON a.ausleih_id = ad.ausleih_id
+                    WHERE a.status = 'ausgeliehen'
+                    GROUP BY ad.geraet_id
+               ) a ON a.geraet_id = g.id
                WHERE 1=1"""
     params = []
     
     if search:
-        query += " AND (g.name LIKE ? OR g.barcode LIKE ? OR g.lagerplatz LIKE ? OR g.seriennummer LIKE ? OR g.modell LIKE ? OR g.instrumentenart LIKE ? OR a.mitarbeiter_name LIKE ? OR a.klasse LIKE ?)"
-        params.extend([f'%{search}%'] * 8)
+        query += " AND (g.name LIKE ? OR g.barcode LIKE ? OR g.lagerplatz LIKE ? OR g.lagerort LIKE ? OR g.seriennummer LIKE ? OR g.modell LIKE ? OR g.instrumentenart LIKE ?)"
+        params.extend([f'%{search}%'] * 7)
     
     if status_filters:
         status_conditions = []
         if "verfügbar" in status_filters:
             status_conditions.append("g.status = 'verfügbar'")
         if "ausgeliehen" in status_filters:
-            status_conditions.append("g.status LIKE 'ausgeliehen%'")
+            status_conditions.append("(g.status LIKE 'ausgeliehen%' OR g.status NOT IN ('verfügbar', 'defekt', 'zugewiesen'))")
+        if "defekt" in status_filters:
+            status_conditions.append("g.status = 'defekt'")
+        if "zugewiesen" in status_filters:
+            status_conditions.append("g.status = 'zugewiesen'")
         if status_conditions:
             query += f" AND ({' OR '.join(status_conditions)})"
     
@@ -794,11 +1829,11 @@ def devices():
     
     if klasse_filters:
         placeholders = ','.join('?' for _ in klasse_filters)
-        query += f" AND a.klasse IN ({placeholders})"
+        query += f" AND g.lagerort IN ({placeholders})"
         params.extend(klasse_filters)
     
 
-    if sort_by == 'instrumentenart':
+    if sort_by in ('instrumentenart', 'category'):
         query += " ORDER BY g.instrumentenart, g.name"
     elif sort_by == 'lagerplatz':
         query += " ORDER BY g.lagerplatz, g.name"
@@ -812,82 +1847,176 @@ def devices():
     c.execute(query, params)
     devices_list = c.fetchall()
     
-    grouped_devices = {}
-    if group_by == 'model':
-        for device in devices_list:
-            model = device[7] or 'Unbekanntes Modell'
-            if model not in grouped_devices:
-                grouped_devices[model] = []
-            grouped_devices[model].append(device)
-    elif group_by == 'series':
-        for device in devices_list:
-            instrument = device[9] or 'Unbekanntes Instrument'
-            if instrument not in grouped_devices:
-                grouped_devices[instrument] = []
-            grouped_devices[instrument].append(device)
-    elif group_by == 'serial':
-        for device in devices_list:
-            serial = device[6] or ''  
-            first_letter = serial[0].upper() if serial else 'Unbekannt'
-            if first_letter not in grouped_devices:
-                grouped_devices[first_letter] = []
-            grouped_devices[first_letter].append(device)
-    elif group_by == 'instrument':
-        for device in devices_list:
-            instrument = device[8] or 'Unbekanntes Instrument'  
-            if instrument not in grouped_devices:
-                grouped_devices[instrument] = []
-            grouped_devices[instrument].append(device)
-    elif group_by == 'status':
-        for device in devices_list:
-            status = 'Verfügbar' if device[4] == 'verfügbar' else 'Ausgeliehen'
-            if status not in grouped_devices:
-                grouped_devices[status] = []
-            grouped_devices[status].append(device)
-    else:
-        grouped_devices['Alle Geräte'] = devices_list
+    # The device list represents product groups. Keep each physical copy as a
+    # separate inventory row so status and labels can still be managed per ID.
+    product_groups_by_key = {}
+    for device in devices_list:
+        product_signature = (device[1], device[3], device[5], device[7], device[8],
+                             device[10], device[11], device[13], device[14], device[15],
+                             device[19], device[20])
+        if group_by == 'status':
+            product_signature += (device[4],)
+        product_groups_by_key.setdefault(product_signature, []).append(device)
+
+    grouped_device_groups = {}
+    for product_devices in product_groups_by_key.values():
+        representative = product_devices[0]
+        if group_by == 'model':
+            section_name = representative[7] or 'Unbekanntes Modell'
+        elif group_by in ('instrument', 'category'):
+            section_name = representative[8] or 'Unkategorisiert'
+        elif group_by == 'status':
+            section_name = STATUS_LABELS.get(representative[4], representative[4] or 'Verfügbar')
+        else:
+            section_name = 'Alle Geräte'
+        grouped_device_groups.setdefault(section_name, []).append({'devices': product_devices})
     
     c.execute("SELECT DISTINCT instrumentenart FROM geraete WHERE instrumentenart IS NOT NULL")
     instrumentenarten = [row[0] for row in c.fetchall()]
-    c.execute("SELECT DISTINCT klasse FROM ausleihen WHERE klasse IS NOT NULL")
-    klassen = [row[0] for row in c.fetchall()]
+    c.execute("SELECT DISTINCT lagerort FROM geraete WHERE lagerort IS NOT NULL AND lagerort != '' ORDER BY lagerort")
+    lagerorte = [row[0] for row in c.fetchall()]
+    dmx_profiles = {device[0]: _decode_dmx_channel_map(device[19]) for device in devices_list if device[19]}
     conn.close()
     
-    return render_template('devices.html', title="Geräte", devices=devices_list, grouped_devices=grouped_devices,
+    return render_template('devices.html', title="Geräte", devices=devices_list,
+                         grouped_device_groups=grouped_device_groups,
                          search=search, status_filters=status_filters,
                          art_filters=art_filters, klasse_filters=klasse_filters,
-                         sort_by=sort_by, group_by=group_by, instrumentenarten=instrumentenarten, klassen=klassen)
+                         sort_by=sort_by, group_by=group_by, instrumentenarten=instrumentenarten, lagerorte=lagerorte,
+                         dmx_profiles=dmx_profiles)
+
+@app.route('/devices/group_edit', methods=['GET', 'POST'])
+def group_edit_devices():
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+    create_warehouse_db(session['current_lager'])
+
+    raw_ids = []
+    for value in request.values.getlist('ids'):
+        raw_ids.extend(str(value).split(','))
+    device_ids = sorted({int(value) for value in raw_ids if str(value).strip().isdigit()})[:500]
+    if not device_ids:
+        flash('Bitte wähle eine Gerätegruppe aus.')
+        return redirect(url_for('devices'))
+
+    conn = get_db_connection(session['current_lager'])
+    c = conn.cursor()
+    placeholders = ','.join('?' for _ in device_ids)
+    c.execute(f"SELECT * FROM geraete WHERE id IN ({placeholders}) ORDER BY name, id", tuple(device_ids))
+    devices = c.fetchall()
+    if not devices:
+        conn.close()
+        flash('Keine passenden Geräte gefunden.')
+        return redirect(url_for('devices'))
+
+    if request.method == 'POST':
+        def read_group_price(field):
+            raw = (request.form.get(field) or '').strip().replace(',', '.')
+            try:
+                return float(raw) if raw else None
+            except ValueError:
+                return None
+
+        submitted_name = (request.form.get('name') or '').strip()
+        lagerplatz = (request.form.get('lagerplatz') or '').strip()
+        lagerort = (request.form.get('lagerort') or '').strip()
+        beschreibung = (request.form.get('beschreibung') or '').strip()
+        modell = (request.form.get('modell') or '').strip()
+        hersteller = (request.form.get('hersteller') or '').strip()
+        instrumentenart = (request.form.get('instrumentenart') or '').strip()
+        kaufdatum = request.form.get('kaufdatum') or None
+        preis = read_group_price('kaufpreis')
+        mietpreis = read_group_price('mietpreis')
+        status_mode = request.form.get('status') or ''
+
+        backup_db(session['current_lager'], 'before_group_edit_device')
+        for device in devices:
+            name = submitted_name or device[1]
+            c.execute("""UPDATE geraete SET name = ?, lagerplatz = ?, lagerort = ?, beschreibung = ?,
+                         modell = ?, hersteller = ?, instrumentenart = ?, kaufdatum = ?, preis = ?,
+                         mietpreis = ? WHERE id = ?""",
+                      (name, lagerplatz, lagerort, beschreibung, modell, hersteller, instrumentenart,
+                       kaufdatum, preis, mietpreis, device[0]))
+            if status_mode in DEVICE_MANUAL_STATUSES:
+                c.execute("UPDATE geraete SET status = ? WHERE id = ?", (status_mode, device[0]))
+        conn.commit()
+        backup_db(session['current_lager'], 'after_group_edit_device')
+        for device in devices:
+            if status_mode == 'verfügbar':
+                update_device_status(session['current_lager'], device[0])
+        conn.close()
+        flash(f'{len(devices)} Gerät(e) der Gruppe wurden aktualisiert.')
+        return redirect(url_for('devices'))
+
+    c.execute("SELECT DISTINCT instrumentenart FROM geraete WHERE instrumentenart IS NOT NULL")
+    instrumentenarten = [row[0] for row in c.fetchall()]
+    conn.close()
+    return render_template('group_edit.html', title="Gerätegruppe bearbeiten", devices=devices,
+                           instrumentenarten=instrumentenarten, device_ids=','.join(str(d[0]) for d in devices))
+
 
 @app.route('/add_device', methods=['GET', 'POST'])
 def add_device():
     if 'current_lager' not in session:
         return redirect(url_for('dashboard'))
+    create_warehouse_db(session['current_lager'])
 
     if request.method == 'POST':
-        name = request.form['name']
-        lagerplatz = request.form['lagerplatz']
-        beschreibung = request.form['beschreibung']
-        seriennummer = request.form['seriennummer']
-        modell = request.form['modell']
-        instrumentenart = request.form['instrumentenart']
-        inventarnummer = request.form['inventarnummer']
-        kaufdatum = request.form['kaufdatum']
-        preis = request.form.get('preis', 0)
-        quantity = int(request.form.get('quantity', 1)) if request.form.get('quantity_enabled') == 'on' else 1
-        hersteller = request.form['hersteller']
+        name = (request.form.get('name') or '').strip()
+        lagerplatz = (request.form.get('lagerplatz') or '').strip()
+        lagerort = (request.form.get('lagerort') or '').strip()
+        beschreibung = (request.form.get('beschreibung') or '').strip()
+        seriennummer = (request.form.get('seriennummer') or '').strip()
+        modell = (request.form.get('modell') or '').strip()
+        instrumentenart = (request.form.get('instrumentenart') or '').strip()
+        kaufdatum = request.form.get('kaufdatum') or None
+        def read_price(field):
+            raw = (request.form.get(field) or '').strip().replace(',', '.')
+            try:
+                return float(raw) if raw else None
+            except ValueError:
+                return None
+        preis = read_price('kaufpreis')
+        mietpreis = read_price('mietpreis')
+        try:
+            dmx_belegung = _parse_dmx_channel_map(request.form)
+            bild_mimetype, bild_daten = _read_uploaded_device_image(request.files.get('bild'))
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            return redirect(url_for('add_device'))
+        try:
+            quantity = int(request.form.get('quantity') or 1) if request.form.get('quantity_enabled') == 'on' else 1
+        except (TypeError, ValueError):
+            quantity = 1
+        quantity = max(1, min(quantity, 1000))
+        individual_qr = request.form.get('individual_qr') == 'on'
+        hersteller = (request.form.get('hersteller') or '').strip()
 
         conn = get_db_connection(session['current_lager'])
         c = conn.cursor()
 
-        while True:
-            barcode = generate_random_id(6)
-            c.execute("SELECT id FROM geraete WHERE barcode = ?", (barcode,))
-            if not c.fetchone():
-                break
-
         backup_db(session['current_lager'], 'before_add_device')
-        c.execute("INSERT INTO geraete (name, barcode, lagerplatz, beschreibung, seriennummer, modell, instrumentenart, inventarnummer, kaufdatum, preis, quantity, hersteller) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                  (name, barcode, lagerplatz, beschreibung, seriennummer, modell, instrumentenart, inventarnummer, kaufdatum, preis, quantity, hersteller))
+
+        def insert_device(stock_quantity):
+            while True:
+                barcode = generate_random_id(8)
+                c.execute("SELECT id FROM geraete WHERE barcode = ?", (barcode,))
+                if not c.fetchone():
+                    break
+            c.execute("""INSERT INTO geraete
+                         (name, barcode, lagerplatz, beschreibung, seriennummer, modell, instrumentenart,
+                          inventarnummer, kaufdatum, preis, quantity, hersteller, lagerort, mietpreis,
+                          dmx_belegung, bild_mimetype, bild_daten)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      (name, barcode, lagerplatz, beschreibung, seriennummer, modell, instrumentenart,
+                       kaufdatum, preis, stock_quantity, hersteller, lagerort, mietpreis,
+                       dmx_belegung, bild_mimetype, bild_daten))
+
+        if individual_qr:
+            for _ in range(quantity):
+                insert_device(1)
+        else:
+            insert_device(quantity)
         conn.commit()
         backup_db(session['current_lager'], 'after_add_device')
         conn.close()
@@ -899,12 +2028,13 @@ def add_device():
     instrumentenarten = [row[0] for row in c.fetchall()]
     conn.close()
     
-    return render_template('add_device.html', title="Gerät hinzufügen", instrumentenarten=instrumentenarten)
+    return render_template('add_device.html', title="Gerät hinzufügen", instrumentenarten=instrumentenarten, dmx_belegung=[])
 
 @app.route('/edit_device/<int:device_id>', methods=['GET', 'POST'])
 def edit_device(device_id):
     if 'current_lager' not in session:
         return redirect(url_for('dashboard'))
+    create_warehouse_db(session['current_lager'])
     
     conn = get_db_connection(session['current_lager'])
     c = conn.cursor()
@@ -912,20 +2042,46 @@ def edit_device(device_id):
     if request.method == 'POST':
         c.execute("SELECT * FROM geraete WHERE id = ?", (device_id,))
         device = c.fetchone()
+        if not device:
+            conn.close()
+            return redirect(url_for('devices'))
 
         name = request.form['name']
         barcode = request.form['barcode']
-        lagerplatz = request.form['lagerplatz']
-        new_beschreibung = request.form['beschreibung']
-        seriennummer = request.form['seriennummer']
-        modell = request.form['modell']
-        instrumentenart = request.form['instrumentenart']
-        inventarnummer = request.form['inventarnummer']
-        kaufdatum = request.form['kaufdatum']
-        preis = request.form.get('preis', 0)
-        quantity = int(request.form.get('quantity', 1))
-        hersteller = request.form['hersteller']
-        defekt = request.form.get('defekt', 'off') == 'on'
+        lagerplatz = (request.form.get('lagerplatz') or '').strip()
+        lagerort = (request.form.get('lagerort') or '').strip()
+        new_beschreibung = (request.form.get('beschreibung') or '').strip()
+        seriennummer = (request.form.get('seriennummer') or '').strip()
+        modell = (request.form.get('modell') or '').strip()
+        instrumentenart = (request.form.get('instrumentenart') or '').strip()
+        inventarnummer = device[9]
+        kaufdatum = request.form.get('kaufdatum') or None
+        def read_edit_price(field):
+            raw = (request.form.get(field) or '').strip().replace(',', '.')
+            try:
+                return float(raw) if raw else None
+            except ValueError:
+                return None
+        preis = read_edit_price('kaufpreis')
+        mietpreis = read_edit_price('mietpreis')
+        try:
+            dmx_belegung = _parse_dmx_channel_map(request.form)
+            uploaded_mimetype, uploaded_image = _read_uploaded_device_image(request.files.get('bild'))
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            conn.close()
+            return redirect(url_for('edit_device', device_id=device_id))
+        if request.form.get('remove_bild') == 'on':
+            bild_mimetype, bild_daten = None, None
+        elif uploaded_image is not None:
+            bild_mimetype, bild_daten = uploaded_mimetype, uploaded_image
+        else:
+            bild_mimetype, bild_daten = device[20], device[21]
+        quantity = device[12] or 1
+        hersteller = (request.form.get('hersteller') or '').strip()
+        requested_status = request.form.get('status')
+        if requested_status not in DEVICE_MANUAL_STATUSES:
+            requested_status = 'defekt' if request.form.get('defekt', 'off') == 'on' else 'verfügbar'
 
         c.execute("SELECT id FROM geraete WHERE barcode = ? AND id != ?", (barcode, device_id))
         if c.fetchone():
@@ -945,21 +2101,27 @@ def edit_device(device_id):
             beschreibung = current_beschreibung
 
         backup_db(session['current_lager'], 'before_edit_device')
-        if defekt:
-            status = 'defekt'
-        else:
-            status = 'verfügbar'  # temporary
-        c.execute("UPDATE geraete SET name = ?, barcode = ?, lagerplatz = ?, beschreibung = ?, seriennummer = ?, modell = ?, instrumentenart = ?, inventarnummer = ?, kaufdatum = ?, preis = ?, quantity = ?, hersteller = ?, status = ? WHERE id = ?",
-                  (name, barcode, lagerplatz, beschreibung, seriennummer, modell, instrumentenart, inventarnummer, kaufdatum, preis, quantity, hersteller, status, device_id))
+        status = 'defekt' if requested_status == 'defekt' else 'verfügbar'
+        c.execute("""UPDATE geraete SET name = ?, barcode = ?, lagerplatz = ?, beschreibung = ?, seriennummer = ?,
+                     modell = ?, instrumentenart = ?, inventarnummer = ?, kaufdatum = ?, preis = ?, quantity = ?,
+                     hersteller = ?, status = ?, lagerort = ?, mietpreis = ?, dmx_universum = ?,
+                     dmx_startadresse = ?, dmx_kanaele = ?, dmx_belegung = ?, bild_mimetype = ?, bild_daten = ? WHERE id = ?""",
+                  (name, barcode, lagerplatz, beschreibung, seriennummer, modell, instrumentenart,
+                   inventarnummer, kaufdatum, preis, quantity, hersteller, status, lagerort,
+                   mietpreis, device[16], device[17], device[18], dmx_belegung,
+                   bild_mimetype, bild_daten, device_id))
         conn.commit()
         backup_db(session['current_lager'], 'after_edit_device')
-        if not defekt:
+        if requested_status != 'defekt':
             update_device_status(session['current_lager'], device_id)
         conn.close()
         return redirect(url_for('devices'))
     
     c.execute("SELECT * FROM geraete WHERE id = ?", (device_id,))
     device = c.fetchone()
+    if not device:
+        conn.close()
+        return redirect(url_for('devices'))
     c.execute("SELECT DISTINCT instrumentenart FROM geraete WHERE instrumentenart IS NOT NULL")
     instrumentenarten = [row[0] for row in c.fetchall()]
     conn.close()
@@ -974,7 +2136,27 @@ def edit_device(device_id):
                 bracket_end = latest_entry.find(']') + 1
                 current_description = latest_entry[bracket_end:].strip()
     
-    return render_template('edit_device.html', title="Gerät bearbeiten", device=device, instrumentenarten=instrumentenarten, current_description=current_description)
+    return render_template('edit_device.html', title="Gerät bearbeiten", device=device, instrumentenarten=instrumentenarten,
+                           current_description=current_description, dmx_belegung=_decode_dmx_channel_map(device[19]),
+                           has_image=bool(device[21]))
+
+
+@app.route('/device-image/<int:device_id>')
+def device_image(device_id):
+    if 'user_id' not in session or not session.get('current_lager'):
+        return '', 404
+    lager_id = session['current_lager']
+    if not user_has_lager_access(lager_id, session['user_id'], is_admin()):
+        return '', 404
+    create_warehouse_db(lager_id)
+    conn = get_db_connection(lager_id)
+    c = conn.cursor()
+    c.execute("SELECT bild_daten, bild_mimetype FROM geraete WHERE id = ?", (device_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return '', 404
+    return send_file(BytesIO(row[0]), mimetype=row[1] or 'image/jpeg', max_age=3600)
 
 @app.route('/delete_device/<int:device_id>')
 def delete_device(device_id):
@@ -1631,28 +2813,28 @@ def update_device_status(lager_id, device_id, conn=None):
         c = conn.cursor()
 
         # Get device info
-        c.execute("SELECT name, quantity FROM geraete WHERE id = ?", (device_id,))
+        c.execute("SELECT name, quantity, status FROM geraete WHERE id = ?", (device_id,))
         device = c.fetchone()
         if not device:
             return
 
-        device_name, max_quantity = device
+        device_name, max_quantity, current_status = device
+        if current_status == 'defekt':
+            return
 
-        # Calculate total borrowed per borrower
-        c.execute("""SELECT a.mitarbeiter_name, SUM(ad.quantity) as total_quantity
+        # Calculate total borrowed quantity
+        c.execute("""SELECT COALESCE(SUM(ad.quantity), 0)
                      FROM ausleih_details ad
                      JOIN ausleihen a ON ad.ausleih_id = a.ausleih_id
-                     WHERE ad.geraet_id = ? AND a.status = 'ausgeliehen'
-                     GROUP BY a.mitarbeiter_name
-                     ORDER BY a.mitarbeiter_name""", (device_id,))
-        borrowers = c.fetchall()
+                     WHERE ad.geraet_id = ? AND a.status = 'ausgeliehen'""", (device_id,))
+        borrowed_quantity = c.fetchone()[0] or 0
 
-        # Update status
-        if not borrowers:
-            status = 'verfügbar'
+        if borrowed_quantity > 0:
+            status = 'ausgeliehen'
+        elif active_event_assignment_exists(lager_id, device_id, 'device'):
+            status = 'zugewiesen'
         else:
-            borrower_strings = [f"{name} ({qty})" for name, qty in borrowers]
-            status = ", ".join(borrower_strings)
+            status = 'verfügbar'
 
         c.execute("UPDATE geraete SET status = ? WHERE id = ?", (status, device_id))
         
@@ -1673,6 +2855,11 @@ def borrow():
     if request.method == 'POST':
         if 'add_device' in request.form:
             barcode_inputs = request.form['barcode'].strip().split('\n')
+            try:
+                requested_quantity = int(request.form.get('borrow_quantity') or 1)
+            except (TypeError, ValueError):
+                requested_quantity = 1
+            requested_quantity = max(1, requested_quantity)
 
             if 'borrow_list' not in session:
                 session['borrow_list'] = []
@@ -1680,7 +2867,7 @@ def borrow():
             conn = get_db_connection(session['current_lager'])
             c = conn.cursor()
 
-            added_count = 0
+            added_units = 0
             error_messages = []
 
             for barcode_input in barcode_inputs:
@@ -1688,11 +2875,17 @@ def borrow():
                 if not barcode:
                     continue
 
-                c.execute("SELECT id, name, barcode, quantity FROM geraete WHERE barcode = ?", (barcode,))
+                c.execute("SELECT id, name, barcode, quantity, status FROM geraete WHERE barcode = ?", (barcode,))
                 device = c.fetchone()
 
                 if device:
-                    device_id, name, barcode_val, max_quantity = device
+                    device_id, name, barcode_val, max_quantity, device_status = device
+                    if device_status == 'defekt':
+                        error_messages.append(f"Gerät '{name}' ist als defekt markiert und kann nicht ausgeliehen werden.")
+                        continue
+                    if device_status == 'zugewiesen':
+                        error_messages.append(f"Gerät '{name}' ist einem Event zugewiesen und aktuell nicht ausleihbar.")
+                        continue
                     # Check how many are already borrowed
                     c.execute("SELECT SUM(ad.quantity) FROM ausleih_details ad JOIN ausleihen a ON ad.ausleih_id = a.ausleih_id WHERE ad.geraet_id = ? AND a.status = 'ausgeliehen'", (device_id,))
                     already_borrowed = c.fetchone()[0] or 0
@@ -1704,27 +2897,35 @@ def borrow():
 
                     existing = next((d for d in session['borrow_list'] if d['id'] == device_id), None)
                     if existing:
-                        if existing['quantity'] >= available:
+                        room = available - existing['quantity']
+                        if room <= 0:
                             error_messages.append(f"Maximale Anzahl für '{name}' bereits ausgewählt ({available}).")
                         else:
-                            existing['quantity'] += 1
+                            add_qty = min(requested_quantity, room)
+                            existing['quantity'] += add_qty
+                            existing['max_quantity'] = available
                             session.modified = True
-                            added_count += 1
+                            added_units += add_qty
+                            if add_qty < requested_quantity:
+                                error_messages.append(f"Nur {add_qty} von {requested_quantity} Exemplar(en) für '{name}' verfügbar.")
                     else:
+                        add_qty = min(requested_quantity, available)
                         session['borrow_list'].append({
                             'id': device_id, 'name': name, 'barcode': barcode_val,
-                            'quantity': 1,
+                            'quantity': add_qty,
                             'max_quantity': available
                         })
                         session.modified = True
-                        added_count += 1
+                        added_units += add_qty
+                        if add_qty < requested_quantity:
+                            error_messages.append(f"Nur {add_qty} von {requested_quantity} Exemplar(en) für '{name}' verfügbar.")
                 else:
                     error_messages.append(f"Gerät mit Barcode '{barcode}' nicht gefunden.")
 
             conn.close()
 
-            if added_count > 0:
-                flash(f"{added_count} Gerät(e) erfolgreich zur Ausleihliste hinzugefügt.", "success")
+            if added_units > 0:
+                flash(f"{added_units} Gerät(e) erfolgreich zur Ausleihliste hinzugefügt.", "success")
             if error_messages:
                 for msg in error_messages:
                     flash(msg, "error")
@@ -1855,34 +3056,52 @@ def return_devices():
 def inventory():
     if 'current_lager' not in session:
         return redirect(url_for('dashboard'))
+    create_warehouse_db(session['current_lager'])
     
     search = request.args.get('search', '')
     status_filters = [f for f in request.args.getlist('status') if f]
     art_filters = [f for f in request.args.getlist('art') if f]
-    klasse_filters = [f for f in request.args.getlist('klasse') if f]
+    klasse_filters = [f for f in request.args.getlist('lagerort') if f]
     sort_by = request.args.get('sort_by', 'name')
     group_by = request.args.get('group_by', 'none') 
     
     conn = get_db_connection(session['current_lager'])
     c = conn.cursor()
 
-    query = """SELECT g.*, a.mitarbeiter_name, a.zielort, a.datum, a.email, a.klasse
+    query = """SELECT g.id, g.name, g.barcode, g.lagerplatz, g.status, g.beschreibung,
+                      g.seriennummer, g.modell, g.instrumentenart, g.inventarnummer, g.kaufdatum,
+                      g.preis, g.quantity, g.hersteller,
+                      a.mitarbeiter_name, a.zielort, a.datum, a.email, a.klasse, g.lagerort,
+                      g.mietpreis, g.dmx_belegung, g.bild_mimetype
                FROM geraete g
-               LEFT JOIN ausleih_details ad ON g.id = ad.geraet_id
-               LEFT JOIN ausleihen a ON ad.ausleih_id = a.ausleih_id AND a.status = 'ausgeliehen'
+               LEFT JOIN (
+                    SELECT ad.geraet_id,
+                           GROUP_CONCAT(DISTINCT a.mitarbeiter_name SEPARATOR ', ') AS mitarbeiter_name,
+                           GROUP_CONCAT(DISTINCT a.zielort SEPARATOR ', ') AS zielort,
+                           MIN(a.datum) AS datum,
+                           GROUP_CONCAT(DISTINCT a.email SEPARATOR ', ') AS email,
+                           GROUP_CONCAT(DISTINCT a.klasse SEPARATOR ', ') AS klasse
+                    FROM ausleih_details ad JOIN ausleihen a ON a.ausleih_id = ad.ausleih_id
+                    WHERE a.status = 'ausgeliehen'
+                    GROUP BY ad.geraet_id
+               ) a ON a.geraet_id = g.id
                WHERE 1=1"""
     params = []
     
     if search:
-        query += " AND (g.name LIKE ? OR g.barcode LIKE ? OR g.lagerplatz LIKE ? OR g.seriennummer LIKE ? OR g.modell LIKE ? OR g.instrumentenart LIKE ? OR a.mitarbeiter_name LIKE ? OR a.klasse LIKE ?)"
-        params.extend([f'%{search}%'] * 8)
+        query += " AND (g.name LIKE ? OR g.barcode LIKE ? OR g.lagerplatz LIKE ? OR g.lagerort LIKE ? OR g.seriennummer LIKE ? OR g.modell LIKE ? OR g.instrumentenart LIKE ?)"
+        params.extend([f'%{search}%'] * 7)
     
     if status_filters:
         status_conditions = []
         if "verfügbar" in status_filters:
             status_conditions.append("g.status = 'verfügbar'")
         if "ausgeliehen" in status_filters:
-            status_conditions.append("g.status LIKE 'ausgeliehen%'")
+            status_conditions.append("(g.status LIKE 'ausgeliehen%' OR g.status NOT IN ('verfügbar', 'defekt', 'zugewiesen'))")
+        if "defekt" in status_filters:
+            status_conditions.append("g.status = 'defekt'")
+        if "zugewiesen" in status_filters:
+            status_conditions.append("g.status = 'zugewiesen'")
         if status_conditions:
             query += f" AND ({' OR '.join(status_conditions)})"
     
@@ -1893,10 +3112,10 @@ def inventory():
     
     if klasse_filters:
         placeholders = ','.join('?' for _ in klasse_filters)
-        query += f" AND a.klasse IN ({placeholders})"
+        query += f" AND g.lagerort IN ({placeholders})"
         params.extend(klasse_filters)
 
-    if sort_by == 'instrumentenart':
+    if sort_by in ('instrumentenart', 'category'):
         query += " ORDER BY g.instrumentenart, g.name"
     elif sort_by == 'lagerplatz':
         query += " ORDER BY g.lagerplatz, g.name"
@@ -1930,15 +3149,15 @@ def inventory():
             if first_letter not in grouped_devices:
                 grouped_devices[first_letter] = []
             grouped_devices[first_letter].append(device)
-    elif group_by == 'instrument':
+    elif group_by in ('instrument', 'category'):
         for device in devices_list:
-            instrument = device[8] or 'Unbekanntes Instrument'
+            instrument = device[8] or 'Unkategorisiert'
             if instrument not in grouped_devices:
                 grouped_devices[instrument] = []
             grouped_devices[instrument].append(device)
     elif group_by == 'status':
         for device in devices_list:
-            status = 'Verfügbar' if device[4] == 'verfügbar' else 'Ausgeliehen'
+            status = STATUS_LABELS.get(device[4], device[4] or 'Verfügbar')
             if status not in grouped_devices:
                 grouped_devices[status] = []
             grouped_devices[status].append(device)
@@ -1947,14 +3166,52 @@ def inventory():
 
     c.execute("SELECT DISTINCT instrumentenart FROM geraete WHERE instrumentenart IS NOT NULL")
     instrumentenarten = [row[0] for row in c.fetchall()]
-    c.execute("SELECT DISTINCT klasse FROM ausleihen WHERE klasse IS NOT NULL")
-    klassen = [row[0] for row in c.fetchall()]
+    c.execute("SELECT DISTINCT lagerort FROM geraete WHERE lagerort IS NOT NULL AND lagerort != '' ORDER BY lagerort")
+    lagerorte = [row[0] for row in c.fetchall()]
+    dmx_profiles = {device[0]: _decode_dmx_channel_map(device[21]) for device in devices_list if device[21]}
     conn.close()
     
     return render_template('inventory.html', title="Inventar", devices=devices_list, grouped_devices=grouped_devices,
                          search=search, status_filters=status_filters,
                          art_filters=art_filters, klasse_filters=klasse_filters,
-                         sort_by=sort_by, group_by=group_by, instrumentenarten=instrumentenarten, klassen=klassen)
+                         sort_by=sort_by, group_by=group_by, instrumentenarten=instrumentenarten, lagerorte=lagerorte,
+                         dmx_profiles=dmx_profiles)
+
+@app.route('/borrow/update_quantity', methods=['POST'])
+def update_borrow_quantity():
+    if 'current_lager' not in session:
+        return redirect(url_for('dashboard'))
+
+    try:
+        device_id = int(request.form.get('device_id'))
+        quantity = int(request.form.get('quantity') or 1)
+    except (TypeError, ValueError):
+        return redirect(url_for('borrow'))
+    quantity = max(1, quantity)
+
+    conn = get_db_connection(session['current_lager'])
+    c = conn.cursor()
+    c.execute("SELECT name, quantity FROM geraete WHERE id = ?", (device_id,))
+    device = c.fetchone()
+    available = None
+    if device:
+        name, max_quantity = device
+        c.execute("SELECT SUM(ad.quantity) FROM ausleih_details ad JOIN ausleihen a ON ad.ausleih_id = a.ausleih_id WHERE ad.geraet_id = ? AND a.status = 'ausgeliehen'", (device_id,))
+        already_borrowed = c.fetchone()[0] or 0
+        available = max(1, max_quantity - already_borrowed)
+    conn.close()
+
+    if device:
+        if quantity > available:
+            quantity = available
+            flash(f"Nur {available} Exemplar(e) für '{name}' verfügbar.", "error")
+        for item in session.get('borrow_list', []):
+            if item['id'] == device_id:
+                item['quantity'] = quantity
+                item['max_quantity'] = available
+                session.modified = True
+                break
+    return redirect(url_for('borrow'))
 
 @app.route('/remove_from_borrow/<int:device_id>')
 def remove_from_borrow(device_id):
@@ -1967,40 +3224,47 @@ def remove_from_borrow(device_id):
 def manage_lager():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
-    conn = sqlite3.connect('users.db')
+    if not is_admin():
+        return redirect(url_for('dashboard'))
+
+    conn = get_users_conn()
     c = conn.cursor()
-    c.execute("SELECT id, name, created_by, access_users, system_type FROM lager WHERE created_by = ?", (session['user_id'],))
+    c.execute("SELECT id, name, created_by, access_users, system_type FROM lager ORDER BY name")
     lagers = c.fetchall()
     conn.close()
-    
+
     return render_template('manage_lager.html', title="Lager verwalten", lagers=lagers)
 
 @app.route('/edit_lager/<lager_id>', methods=['GET', 'POST'])
 def edit_lager(lager_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
-    conn = sqlite3.connect('users.db')
+    if not is_admin():
+        return redirect(url_for('dashboard'))
+
+    conn = get_users_conn()
     c = conn.cursor()
     
     if request.method == 'POST':
-        name = request.form['name']
+        name = request.form['name'].strip()
         access_users = request.form.getlist('access_users')
+        if session['user_id'] not in access_users:
+            access_users.append(session['user_id'])
         system_type = request.form.get('system_type', 'personal')
-        c.execute("UPDATE lager SET name = ?, access_users = ?, system_type = ? WHERE id = ? AND created_by = ?",
-                  (name, ','.join(access_users), system_type, lager_id, session['user_id']))
+        c.execute("UPDATE lager SET name = ?, access_users = ?, system_type = ? WHERE id = ?",
+                  (name, ','.join(access_users), system_type, lager_id))
         conn.commit()
         conn.close()
         return redirect(url_for('manage_lager'))
     
-    c.execute("SELECT * FROM lager WHERE id = ? AND created_by = ?", (lager_id, session['user_id']))
+    c.execute("SELECT * FROM lager WHERE id = ?", (lager_id,))
     lager = c.fetchone()
     if not lager:
         conn.close()
         return redirect(url_for('manage_lager'))
     
-    c.execute("SELECT id, name FROM users WHERE id != ?", (session['user_id'],))
+    c.execute("SELECT id, name FROM users ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, name",
+              (session['user_id'],))
     users = c.fetchall()
     conn.close()
     
@@ -2010,22 +3274,28 @@ def edit_lager(lager_id):
 def delete_lager(lager_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
-    conn = sqlite3.connect('users.db')
+    if not is_admin():
+        return redirect(url_for('dashboard'))
+
+    conn = get_users_conn()
     c = conn.cursor()
-    c.execute("DELETE FROM lager WHERE id = ? AND created_by = ?", (lager_id, session['user_id']))
-    conn.commit()
+    c.execute("SELECT id FROM lager WHERE id = ?", (lager_id,))
+    existing = c.fetchone()
+    if existing:
+        c.execute("DELETE FROM lager WHERE id = ?", (lager_id,))
+        conn.commit()
     conn.close()
-    
-    if os.path.exists(f'{lager_id}.db'):
-        os.remove(f'{lager_id}.db')
-    
+
+    if existing:
+        drop_lager_db(lager_id)
+
     return redirect(url_for('manage_lager'))
 
 @app.route('/export')
 def export():
     if 'current_lager' not in session:
         return redirect(url_for('dashboard'))
+    create_warehouse_db(session['current_lager'])
     
     format_type = request.args.get('format', 'csv')
     
@@ -2034,33 +3304,51 @@ def export():
         search = filter_data.get('search', '')
         status_filters = filter_data.get('status', [])
         art_filters = filter_data.get('art', [])
-        klasse_filters = filter_data.get('klasse', [])
+        klasse_filters = filter_data.get('lagerort', filter_data.get('klasse', []))
     else:
         search = request.args.get('search', '')
         status_filters = [f for f in request.args.get('status', '').split(',') if f]
         art_filters = [f for f in request.args.get('art', '').split(',') if f]
-        klasse_filters = [f for f in request.args.get('klasse', '').split(',') if f]
+        klasse_filters = [f for f in request.args.get('lagerort', request.args.get('klasse', '')).split(',') if f]
     
     conn = get_db_connection(session['current_lager'])
     c = conn.cursor()
     
-    query = """SELECT g.*, a.mitarbeiter_name, a.zielort, a.datum, a.email, a.klasse
+    query = """SELECT g.id, g.name, g.barcode, g.lagerplatz, g.status, g.beschreibung,
+                      g.seriennummer, g.modell, g.instrumentenart, g.inventarnummer, g.kaufdatum,
+                      g.preis, g.quantity, g.hersteller,
+                      a.mitarbeiter_name, a.zielort, a.datum, a.email, a.klasse,
+                      g.lagerort, g.mietpreis, g.dmx_universum, g.dmx_startadresse, g.dmx_kanaele,
+                      g.dmx_belegung
                FROM geraete g
-               LEFT JOIN ausleih_details ad ON g.id = ad.geraet_id
-               LEFT JOIN ausleihen a ON ad.ausleih_id = a.ausleih_id AND a.status = 'ausgeliehen'
+               LEFT JOIN (
+                    SELECT ad.geraet_id,
+                           GROUP_CONCAT(DISTINCT a.mitarbeiter_name SEPARATOR ', ') AS mitarbeiter_name,
+                           GROUP_CONCAT(DISTINCT a.zielort SEPARATOR ', ') AS zielort,
+                           MIN(a.datum) AS datum,
+                           GROUP_CONCAT(DISTINCT a.email SEPARATOR ', ') AS email,
+                           GROUP_CONCAT(DISTINCT a.klasse SEPARATOR ', ') AS klasse
+                    FROM ausleih_details ad JOIN ausleihen a ON a.ausleih_id = ad.ausleih_id
+                    WHERE a.status = 'ausgeliehen'
+                    GROUP BY ad.geraet_id
+               ) a ON a.geraet_id = g.id
                WHERE 1=1"""
     params = []
     
     if search:
-        query += " AND (g.name LIKE ? OR g.barcode LIKE ? OR g.lagerplatz LIKE ? OR g.seriennummer LIKE ? OR g.modell LIKE ? OR g.instrumentenart LIKE ? OR a.mitarbeiter_name LIKE ? OR a.klasse LIKE ?)"
-        params.extend([f'%{search}%'] * 8)
+        query += " AND (g.name LIKE ? OR g.barcode LIKE ? OR g.lagerplatz LIKE ? OR g.lagerort LIKE ? OR g.seriennummer LIKE ? OR g.modell LIKE ? OR g.instrumentenart LIKE ?)"
+        params.extend([f'%{search}%'] * 7)
     
     if status_filters:
         status_conditions = []
         if "verfügbar" in status_filters:
             status_conditions.append("g.status = 'verfügbar'")
         if "ausgeliehen" in status_filters:
-            status_conditions.append("g.status LIKE 'ausgeliehen%'")
+            status_conditions.append("(g.status LIKE 'ausgeliehen%' OR g.status NOT IN ('verfügbar', 'defekt', 'zugewiesen'))")
+        if "defekt" in status_filters:
+            status_conditions.append("g.status = 'defekt'")
+        if "zugewiesen" in status_filters:
+            status_conditions.append("g.status = 'zugewiesen'")
         if status_conditions:
             query += f" AND ({' OR '.join(status_conditions)})"
     
@@ -2071,53 +3359,80 @@ def export():
     
     if klasse_filters:
         placeholders = ','.join('?' for _ in klasse_filters)
-        query += f" AND a.klasse IN ({placeholders})"
+        query += f" AND g.lagerort IN ({placeholders})"
         params.extend(klasse_filters)
     
     query += " ORDER BY g.instrumentenart, g.name"
     c.execute(query, params)
     devices_list = c.fetchall()
     conn.close()
+
+    if format_type in ('pdf_labels', 'word_labels'):
+        try:
+            selected_ids = {int(value) for value in request.args.getlist('device_ids')}
+        except ValueError:
+            selected_ids = set()
+        if not selected_ids:
+            flash('Markiere zuerst die Geräte, für die Etiketten erstellt werden sollen.', 'error')
+            return redirect(url_for('inventory' if request.args.get('source') == 'inventory' else 'devices'))
+        devices_list = [device for device in devices_list if device[0] in selected_ids]
     
     if format_type == 'csv':
         output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Name', 'Barcode', 'Lagerplatz', 'Status', 'Beschreibung', 'Seriennummer', 'Modell', 'Hersteller', 'Instrumentenart', 'Inventar-Nummer', 'Kaufdatum', 'Preis', 'Ausgeliehen an', 'Email', 'Klasse'])
+        writer = csv.writer(output, delimiter=';')
+        writer.writerow(['ID', 'Name', 'Barcode', 'Lagerort / Raum', 'Lagerplatz', 'Status', 'Anzahl', 'Beschreibung', 'Seriennummer', 'Modell', 'Hersteller', 'Kategorie', 'Kaufdatum', 'Kaufpreis', 'Mietpreis', 'DMX-Kanalbelegung', 'Ausgeliehen an', 'Ausleihziel', 'Ausleihdatum', 'E-Mail', 'Klasse'])
 
         for device in devices_list:
-            writer.writerow([device[1], device[2], device[3], device[4], device[5], device[6], device[7], device[13] or '', device[8], device[9] or '', device[10] or '', device[11] or '', device[12] or '', device[15] or '', device[16] or ''])
+            dmx_text = '; '.join(f"{item['channel']} = {item['function']}" for item in _decode_dmx_channel_map(device[24]))
+            writer.writerow([device[0], device[1] or '', device[2] or '', device[19] or '', device[3] or '', device[4] or '', device[12] or 1, device[5] or '', device[6] or '', device[7] or '', device[13] or '', device[8] or '', device[10] or '', device[11] if device[11] is not None else '', device[20] if device[20] is not None else '', dmx_text, device[14] or '', device[15] or '', device[16] or '', device[17] or '', device[18] or ''])
         
         output.seek(0)
-        return send_file(io.BytesIO(output.getvalue().encode('utf-8')), 
+        return send_file(io.BytesIO(output.getvalue().encode('utf-8-sig')), 
                         mimetype='text/csv', as_attachment=True, download_name='export.csv')
     
+    elif format_type == 'word_labels':
+        # Printable Word labels: 3 columns, one label per device, respecting current filters.
+        doc = Document()
+        doc.add_heading('Geräteetiketten', 0)
+        table = doc.add_table(rows=0, cols=3)
+        table.style = 'Table Grid'
+        for offset in range(0, len(devices_list), 3):
+            cells = table.add_row().cells
+            for column in range(3):
+                if offset + column >= len(devices_list):
+                    continue
+                device = devices_list[offset + column]
+                cell = cells[column]
+                cell.text = ''
+                paragraph = cell.paragraphs[0]
+                paragraph.add_run(str(device[1] or 'Gerät')).bold = True
+                paragraph.add_run(f"\nID: {device[0]}  |  Barcode: {device[2] or ''}")
+                paragraph.add_run(f"\nRaum: {device[19] or '—'}  |  Platz: {device[3] or '—'}")
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return send_file(buffer, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                         as_attachment=True, download_name='geraeteetiketten.docx')
+
     elif format_type == 'word':
         doc = Document()
         doc.add_heading('Geräte Export', 0)
         
-        table = doc.add_table(rows=1, cols=14)
+        table = doc.add_table(rows=1, cols=21)
         hdr_cells = table.rows[0].cells
-        headers = ['Name', 'Barcode', 'Lagerplatz', 'Status', 'Beschreibung', 'Seriennummer', 'Modell', 'Instrumentenart', 'Inventar-Nummer', 'Kaufdatum', 'Preis', 'Ausgeliehen an', 'Email', 'Klasse']
+        headers = ['ID', 'Name', 'Barcode', 'Raum', 'Lagerplatz', 'Status', 'Anzahl', 'Beschreibung', 'Seriennummer', 'Modell', 'Hersteller', 'Kategorie', 'Kaufdatum', 'Kaufpreis', 'Mietpreis', 'DMX-Kanalbelegung', 'Ausgeliehen an', 'Ausleihziel', 'Ausleihdatum', 'E-Mail', 'Klasse']
         
         for i, header in enumerate(headers):
             hdr_cells[i].text = header
         
         for device in devices_list:
             row_cells = table.add_row().cells
-            row_cells[0].text = device[1]
-            row_cells[1].text = device[2]
-            row_cells[2].text = device[3]
-            row_cells[3].text = device[4]
-            row_cells[4].text = device[5] or ''
-            row_cells[5].text = device[6] or ''
-            row_cells[6].text = device[7] or ''
-            row_cells[7].text = device[8] or ''
-            row_cells[8].text = device[9] or ''
-            row_cells[9].text = device[10] or ''
-            row_cells[10].text = str(device[11] or '') + ' €'
-            row_cells[11].text = device[12] or ''
-            row_cells[12].text = device[15] or ''
-            row_cells[13].text = device[16] or ''
+            dmx_text = '; '.join(f"{item['channel']} = {item['function']}" for item in _decode_dmx_channel_map(device[24]))
+            values = [device[0], device[1], device[2], device[19], device[3], device[4], device[12] or 1,
+                      device[5], device[6], device[7], device[13], device[8], device[10], device[11], device[20],
+                      dmx_text, device[14], device[15], device[16], device[17], device[18]]
+            for cell, value in zip(row_cells, values):
+                cell.text = '' if value is None else str(value)
         
         buffer = BytesIO()
         doc.save(buffer)
@@ -2173,14 +3488,15 @@ def export():
                 'seriennummer': device[6] or '',
                 'modell': device[7] or '',
                 'instrumentenart': device[8] or '',
-                'inventarnummer': device[9] or '',
+                'inventarnummer': '',
+                'lagerort': device[19] or '',
                 'kaufdatum': device[10] or '',
                 'preis': f"{device[11] or 0} €",
-                'borrower_name': device[12] or '',
-                'destination': device[13] or '',
-                'borrow_date': device[14] or '',
-                'email': device[15] or '',
-                'class': device[16] or '',
+                'borrower_name': device[14] or '',
+                'destination': device[15] or '',
+                'borrow_date': device[16] or '',
+                'email': device[17] or '',
+                'class': device[18] or '',
                 'borrower_id': '',
                 'text': ''
             }
@@ -2259,6 +3575,14 @@ def export():
                 field_y_pt = y + height - (field_y_px * px_to_pt) - (field_height_px * px_to_pt)
                 field_width_pt = field_width_px * px_to_pt
                 field_height_pt = field_height_px * px_to_pt
+                rotation = float(field.get('rotation') or 0)
+                center_x = field_x_pt + field_width_pt / 2
+                center_y = field_y_pt + field_height_pt / 2
+                canvas.saveState()
+                if rotation:
+                    canvas.translate(center_x, center_y)
+                    canvas.rotate(rotation)
+                    canvas.translate(-center_x, -center_y)
                 
                 if field_type == 'qr':
                     try:
@@ -2315,6 +3639,7 @@ def export():
                                 canvas.drawString(text_x, text_y, str(field_value))
                         except Exception as e:
                             print(f"[v0] Error drawing text: {e}")
+                canvas.restoreState()
         
         from reportlab.pdfgen import canvas as pdfcanvas
         
@@ -2474,10 +3799,11 @@ def info():
                     'instrumentenart': device[8],
                     'inventarnummer': device[9],
                     'kaufdatum': device[10],
-                    'preis': device[11]
+                    'preis': device[11],
+                    'quantity': device[12]
                 }
                 
-                if device[4] != 'verfügbar' and device[4] != 'defekt':
+                if device[4] == 'ausgeliehen' or device[4] not in ('verfügbar', 'defekt', 'zugewiesen'):
                     c.execute("""SELECT a.* FROM ausleihen a
                                 JOIN ausleih_details ad ON a.ausleih_id = ad.ausleih_id
                                 WHERE ad.geraet_id = ? AND a.status = 'ausgeliehen'""", (device[0],))
@@ -2554,6 +3880,306 @@ def update():
     except Exception as e:
         return f"Fehler beim Update: {str(e)}", 500
 
+@app.route('/verwaltung', methods=['GET'])
+def verwaltung():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not is_admin():
+        return redirect(url_for('dashboard'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, name, role, password IS NOT NULL AND password != '' AS has_password FROM users ORDER BY name")
+    users = c.fetchall()
+    conn.close()
+    return render_template('verwaltung.html', title="Verwaltung", users=users,
+                           groups=get_user_groups())
+
+
+@app.route('/verwaltung/system-export', methods=['GET'])
+def admin_system_export():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+    try:
+        archive = _build_system_backup()
+    except Exception as exc:
+        app.logger.exception('Systemexport fehlgeschlagen')
+        flash(f'Der Systemexport ist fehlgeschlagen: {exc}', 'error')
+        return redirect(url_for('verwaltung'))
+    filename = f"dms-systemexport-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
+    return send_file(archive, mimetype='application/zip', as_attachment=True, download_name=filename)
+
+
+@app.route('/verwaltung/system-import', methods=['POST'])
+def admin_system_import():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+    if request.form.get('confirm_text', '').strip() != 'ERSETZEN':
+        flash('Import abgebrochen: Bitte zur Bestätigung ERSETZEN eingeben.', 'error')
+        return redirect(url_for('verwaltung'))
+
+    upload = request.files.get('backup_file')
+    if not upload or not upload.filename:
+        flash('Bitte eine DMS-Systemexport-ZIP-Datei auswählen.', 'error')
+        return redirect(url_for('verwaltung'))
+    archive_bytes = upload.stream.read(SYSTEM_BACKUP_MAX_BYTES + 1)
+    if len(archive_bytes) > SYSTEM_BACKUP_MAX_BYTES:
+        flash('Die Sicherungsdatei ist größer als 512 MB.', 'error')
+        return redirect(url_for('verwaltung'))
+
+    try:
+        with zipfile.ZipFile(BytesIO(archive_bytes), 'r') as archive:
+            member = archive.getinfo('backup.json')
+            if member.file_size > SYSTEM_BACKUP_MAX_BYTES:
+                raise ValueError('Die entpackte Sicherungsdatei ist größer als 512 MB.')
+            payload = json.loads(archive.read(member).decode('utf-8'))
+        _validate_system_backup(payload)
+    except Exception as exc:
+        flash(f'Die Sicherungsdatei ist ungültig: {exc}', 'error')
+        return redirect(url_for('verwaltung'))
+
+    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    backup_dir = Path(app.root_path) / 'system_backups'
+    backup_path = backup_dir / f'vor-import-{timestamp}.zip'
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        current_backup = _build_system_backup()
+        backup_path.write_bytes(current_backup.getvalue())
+    except Exception as exc:
+        app.logger.exception('Sicherheitsbackup vor Import fehlgeschlagen')
+        flash(f'Import nicht ausgeführt: Das Sicherheitsbackup konnte nicht erstellt werden ({exc}).', 'error')
+        return redirect(url_for('verwaltung'))
+
+    try:
+        imported_lager_ids = set(payload['warehouses'])
+        existing_conn = get_users_conn()
+        existing_cursor = existing_conn.cursor()
+        existing_cursor.execute('SELECT id FROM lager')
+        existing_lager_ids = {row[0] for row in existing_cursor.fetchall()}
+        existing_conn.close()
+
+        for lager_id, tables in payload['warehouses'].items():
+            create_warehouse_db(lager_id)
+            _replace_database_contents(get_db_connection(lager_id), tables)
+
+        # Restore shared accounts, warehouse metadata, events and their relations last.
+        _replace_database_contents(get_users_conn(), payload['users_database'])
+
+        for lager_id in existing_lager_ids - imported_lager_ids:
+            drop_lager_db(lager_id)
+
+        flash(f'Import abgeschlossen. Vorherige Datenbanksicherung: {backup_path}', 'success')
+    except Exception as exc:
+        app.logger.exception('Systemimport fehlgeschlagen')
+        flash(f'Import fehlgeschlagen. Die vorherige Sicherung liegt unter {backup_path}. Fehler: {exc}', 'error')
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/verwaltung/benutzer', methods=['POST'])
+def create_user():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    user_id = (request.form.get('user_id') or '').strip()
+    name = (request.form.get('name') or '').strip()
+    password = request.form.get('password') or ''
+    role = request.form.get('role') or 'user'
+    if role not in ('user', 'admin'):
+        role = 'user'
+
+    if user_id and name and password:
+        conn = get_users_conn()
+        c = conn.cursor()
+        try:
+            c.execute("INSERT INTO users (id, name, password, role) VALUES (?, ?, ?, ?)",
+                      (user_id, name, generate_password_hash(password), role))
+            conn.commit()
+            flash(f'Benutzer {user_id} wurde angelegt.')
+        except Exception:
+            conn.rollback()
+            flash(f'Benutzer {user_id} existiert bereits oder konnte nicht angelegt werden.')
+        finally:
+            conn.close()
+    else:
+        flash('Benutzer-ID, Name und Passwort sind erforderlich.')
+
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/verwaltung/benutzer/<user_id>/passwort', methods=['POST'])
+def reset_user_password(user_id):
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    password = request.form.get('password') or ''
+    if password:
+        conn = get_users_conn()
+        c = conn.cursor()
+        c.execute("UPDATE users SET password = ? WHERE id = ?",
+                  (generate_password_hash(password), user_id))
+        conn.commit()
+        conn.close()
+        flash(f'Passwort für {user_id} wurde aktualisiert.')
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/verwaltung/benutzer/<user_id>/rolle', methods=['POST'])
+def set_user_role(user_id):
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    role = request.form.get('role') or 'user'
+    if role not in ('user', 'admin'):
+        role = 'user'
+    if user_id != session.get('user_id'):
+        conn = get_users_conn()
+        c = conn.cursor()
+        c.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+        conn.commit()
+        conn.close()
+        flash(f'Rolle von {user_id} wurde geändert.')
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/verwaltung/benutzer/<user_id>/loeschen', methods=['POST'])
+def delete_user(user_id):
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    if user_id not in (session.get('user_id'), 'TMS-T'):
+        conn = get_users_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM user_group_members WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        flash(f'Benutzer {user_id} wurde gelöscht.')
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/verwaltung/gruppen', methods=['POST'])
+def create_user_group():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    name = (request.form.get('name') or '').strip()
+    member_ids = list(dict.fromkeys(request.form.getlist('member_ids')))
+    if not name:
+        flash('Ein Gruppenname ist erforderlich.')
+        return redirect(url_for('verwaltung'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO user_groups (name) VALUES (?)", (name,))
+        group_id = c.lastrowid
+        for member_id in member_ids:
+            c.execute("INSERT IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+                      (group_id, member_id))
+        conn.commit()
+        flash(f'Gruppe „{name}" wurde angelegt.')
+    except Exception:
+        conn.rollback()
+        flash(f'Gruppe „{name}" existiert bereits oder konnte nicht angelegt werden.')
+    finally:
+        conn.close()
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/verwaltung/gruppen/<int:group_id>/bearbeiten', methods=['POST'])
+def edit_user_group(group_id):
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    name = (request.form.get('name') or '').strip()
+    member_ids = list(dict.fromkeys(request.form.getlist('member_ids')))
+    if not name:
+        flash('Ein Gruppenname ist erforderlich.')
+        return redirect(url_for('verwaltung'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE user_groups SET name = ? WHERE id = ?", (name, group_id))
+        c.execute("DELETE FROM user_group_members WHERE group_id = ?", (group_id,))
+        for member_id in member_ids:
+            c.execute("INSERT IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+                      (group_id, member_id))
+        conn.commit()
+        flash(f'Gruppe „{name}" wurde aktualisiert.')
+    except Exception:
+        conn.rollback()
+        flash(f'Gruppe „{name}" konnte nicht gespeichert werden.')
+    finally:
+        conn.close()
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/verwaltung/gruppen/<int:group_id>/loeschen', methods=['POST'])
+def delete_user_group(group_id):
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM user_group_members WHERE group_id = ?", (group_id,))
+    c.execute("DELETE FROM user_groups WHERE id = ?", (group_id,))
+    conn.commit()
+    conn.close()
+    flash('Gruppe wurde gelöscht.')
+    return redirect(url_for('verwaltung'))
+
+
+@app.route('/passwort', methods=['GET', 'POST'])
+def change_password():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        current_password = request.form.get('current_password') or ''
+        new_password = request.form.get('new_password') or ''
+        confirm_password = request.form.get('confirm_password') or ''
+
+        conn = get_users_conn()
+        c = conn.cursor()
+        c.execute("SELECT password FROM users WHERE id = ?", (session['user_id'],))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            flash('Benutzer wurde nicht gefunden.')
+            return redirect(url_for('login'))
+
+        stored = row[0]
+        valid = True
+        if stored:
+            try:
+                valid = check_password_hash(stored, current_password)
+            except Exception:
+                valid = False
+
+        if not valid:
+            conn.close()
+            flash('Das aktuelle Passwort ist nicht korrekt.')
+            return redirect(url_for('change_password'))
+        if not new_password:
+            conn.close()
+            flash('Bitte gib ein neues Passwort ein.')
+            return redirect(url_for('change_password'))
+        if new_password != confirm_password:
+            conn.close()
+            flash('Die neuen Passwörter stimmen nicht überein.')
+            return redirect(url_for('change_password'))
+
+        c.execute("UPDATE users SET password = ? WHERE id = ?",
+                  (generate_password_hash(new_password), session['user_id']))
+        conn.commit()
+        conn.close()
+        flash('Dein Passwort wurde geändert.')
+        return redirect(url_for('dashboard'))
+
+    return render_template('password_change.html', title="Passwort ändern")
+
+
 @app.route('/logoutdms')
 def logout():
     session.clear()
@@ -2563,3 +4189,38 @@ if __name__ == '__main__':
     init_user_db()
     check_version()
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+BASE_PATH = (os.environ.get('BASE_PATH') or '/lagersystem').rstrip('/')
+if not BASE_PATH.startswith('/'):
+    BASE_PATH = '/' + BASE_PATH
+app.config['BASE_PATH'] = BASE_PATH
+app.config['APPLICATION_ROOT'] = BASE_PATH or '/'
+app.config['SESSION_COOKIE_PATH'] = BASE_PATH or '/'
+
+
+class PrefixMiddleware:
+    def __init__(self, app, prefix=BASE_PATH):
+        self.app = app
+        self.prefix = prefix.rstrip('/')
+    def __call__(self, environ, start_response):
+        forwarded = environ.get('HTTP_X_FORWARDED_PREFIX') or environ.get('HTTP_X_SCRIPT_NAME')
+        script_name = (forwarded or self.prefix).rstrip('/')
+        if script_name:
+            environ['SCRIPT_NAME'] = script_name
+            path_info = environ.get('PATH_INFO', '')
+            if path_info == script_name:
+                environ['PATH_INFO'] = '/'
+            elif path_info.startswith(script_name + '/'):
+                environ['PATH_INFO'] = path_info[len(script_name):] or '/'
+        return self.app(environ, start_response)
+
+
+app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=BASE_PATH)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+
+@app.context_processor
+def inject_base_path():
+    return dict(base_path=BASE_PATH)

@@ -5,49 +5,102 @@
     <h1 class="text-3xl font-bold text-center mb-8">
         <i class="fas fa-edit mr-3"></i>Gerät bearbeiten
     </h1>
-    <form method="POST" class="bg-gray-800 p-6 rounded-lg space-y-4" id="editDeviceForm">
+    <form method="POST" enctype="multipart/form-data" class="bg-gray-800 p-6 rounded-lg space-y-4" id="editDeviceForm">
         <input type="text" name="name" value="{{ device[1] }}"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none"
                data-autofocus onkeypress="submitFormOnEnter(event, 'editDeviceForm')" >
         <input type="text" name="barcode" value="{{ device[2] }}"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none"
                onkeypress="submitFormOnEnter(event, 'editDeviceForm')" >
         <input type="text" name="lagerplatz" value="{{ device[3] }}"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none"
                onkeypress="submitFormOnEnter(event, 'editDeviceForm')" >
+        <input type="text" name="lagerort" value="{{ device[14] or '' }}" placeholder="Lagerort / Raum"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         <input type="text" name="seriennummer" value="{{ device[6] or '' }}" placeholder="Seriennummer"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         <input type="text" name="modell" value="{{ device[7] or '' }}" placeholder="Modell"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         <input type="text" name="hersteller" value="{{ device[13] or '' }}" placeholder="Hersteller"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
-        <input type="text" name="instrumentenart" value="{{ device[8] or '' }}" placeholder="Instrumentenart" list="instrumentenarten"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+        <label class="block text-sm text-gray-300">Kategorie</label>
+        <input type="text" name="instrumentenart" value="{{ device[8] or '' }}" placeholder="Kategorie" list="instrumentenarten"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         <datalist id="instrumentenarten">
             {% for art in instrumentenarten %}
             <option value="{{ art }}" {% if art == device[8] %}selected{% endif %}>{{ art }}</option>
             {% endfor %}
         </datalist>
-        <input type="text" name="inventarnummer" value="{{ device[9] or '' }}" placeholder="Inventar-Nummer (extern)"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
         <input type="date" name="kaufdatum" value="{{ device[10] or '' }}" placeholder="Kaufdatum"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
-        <input type="number" name="preis" value="{{ device[11] or '' }}" placeholder="Preis (€)" step="0.01" min="0"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
-        <input type="number" name="quantity" value="{{ device[12] or 1 }}" min="1" placeholder="Menge"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input type="number" name="kaufpreis" value="{{ device[11] or '' }}" placeholder="Kaufpreis (€)" step="0.01" min="0"
+                   class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+            <input type="number" name="mietpreis" value="{{ device[15] or '' }}" placeholder="Mietpreis (€)" step="0.01" min="0"
+                   class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+        </div>
+        <details class="bg-gray-800 border border-gray-700 rounded-lg p-4" {% if dmx_belegung %}open{% endif %}>
+            <summary class="cursor-pointer text-sm font-medium text-gray-200">DMX-Kanalbelegung (optional)</summary>
+            <p class="text-xs text-gray-400 mt-2 mb-3">Funktion pro Kanal, z. B. 1 = Pan, 2 = Tilt, 3 = Dimmer.</p>
+            <div id="dmxRows" class="space-y-2 mt-3">
+                {% for entry in dmx_belegung %}
+                <div class="dmx-row grid grid-cols-[1fr_2fr_auto] gap-2">
+                    <input type="number" name="dmx_channel" value="{{ entry.channel }}" min="1" max="512" placeholder="Kanal" class="w-full p-2.5 bg-gray-700 rounded">
+                    <input type="text" name="dmx_function" value="{{ entry.function }}" maxlength="100" placeholder="Funktion" class="w-full p-2.5 bg-gray-700 rounded">
+                    <button type="button" class="remove-dmx-row px-3 text-gray-400 hover:text-red-400" title="Zeile entfernen"><i class="fas fa-times"></i></button>
+                </div>
+                {% else %}
+                <div class="dmx-row grid grid-cols-[1fr_2fr_auto] gap-2">
+                    <input type="number" name="dmx_channel" min="1" max="512" placeholder="Kanal" class="w-full p-2.5 bg-gray-700 rounded">
+                    <input type="text" name="dmx_function" maxlength="100" placeholder="Funktion" class="w-full p-2.5 bg-gray-700 rounded">
+                    <button type="button" class="remove-dmx-row px-3 text-gray-400 hover:text-red-400" title="Zeile entfernen"><i class="fas fa-times"></i></button>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button" id="addDmxRow" class="mt-3 text-xs text-blue-300 hover:text-blue-200"><i class="fas fa-plus mr-1"></i>Kanal hinzufügen</button>
+        </details>
+        {% if has_image %}<img src="{{ url_for('device_image', device_id=device[0]) }}" alt="Gerätebild" class="w-32 h-32 object-cover rounded-lg border border-gray-700">{% endif %}
+        <div>
+            <label for="device_image" class="block text-sm text-gray-300 mb-2">Bild ändern (JPG/PNG/WebP, max. 8 MB)</label>
+            <input type="file" id="device_image" name="bild" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100">
+            {% if has_image %}<label class="flex items-center gap-2 text-xs text-gray-400 mt-2"><input type="checkbox" name="remove_bild">Vorhandenes Bild entfernen</label>{% endif %}
+        </div>
+        <p class="text-xs text-gray-400">Anzahl dieses Geräteeintrags: {{ device[12] or 1 }}. Neue Geräte werden einzeln mit eigener ID angelegt.</p>
         <textarea name="beschreibung" placeholder="Beschreibung"
-                  class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none h-24"
+                  class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none h-24"
                   onkeypress="submitFormOnEnter(event, 'editDeviceForm')">{{ current_description }}</textarea>
-        <label class="inline-flex items-center space-x-2">
-            <input type="checkbox" name="defekt" {% if device[4] == 'defekt' %}checked{% endif %} class="form-checkbox h-5 w-5 text-orange-500">
-            <span class="text-orange-400 font-semibold">Defekt</span>
-        </label>
+        <div>
+            <label class="block text-xs text-gray-400 mb-2" for="device_status">Status</label>
+            <select id="device_status" name="status"
+                    class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+                <option value="verfügbar" {% if device[4] != 'defekt' %}selected{% endif %}>Verfügbar</option>
+                <option value="defekt" {% if device[4] == 'defekt' %}selected{% endif %}>Defekt</option>
+            </select>
+            {% if device[4] in ('ausgeliehen', 'zugewiesen') %}
+            <p class="text-xs text-yellow-400 mt-2">
+                Automatischer Status: {{ device[4] }} (wird beim Zurückgeben bzw. nach dem Event neu berechnet)
+            </p>
+            {% endif %}
+        </div>
         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 p-3 rounded font-semibold transition">
             <i class="fas fa-save mr-2"></i>Speichern
         </button>
     </form>
-    <a href="/devices" class="block text-center mt-4 text-gray-400 hover:text-white">
+    <script>
+    document.getElementById('addDmxRow').addEventListener('click', () => {
+        const row = document.querySelector('.dmx-row').cloneNode(true);
+        row.querySelectorAll('input').forEach(input => input.value = '');
+        document.getElementById('dmxRows').appendChild(row);
+    });
+    document.getElementById('dmxRows').addEventListener('click', event => {
+        const button = event.target.closest('.remove-dmx-row');
+        if (!button) return;
+        const rows = document.querySelectorAll('.dmx-row');
+        if (rows.length > 1) button.closest('.dmx-row').remove();
+        else button.closest('.dmx-row').querySelectorAll('input').forEach(input => input.value = '');
+    });
+    </script>
+    <a href="{{ base_path }}/devices" class="block text-center mt-4 text-gray-400 hover:text-white">
         <i class="fas fa-arrow-left mr-2"></i>Zurück
     </a>
 </div>

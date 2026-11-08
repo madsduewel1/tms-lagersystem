@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 sm:px-0 pb-8">
+    <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl sm:text-3xl font-semibold flex items-center gap-3">
+                <i class="fas fa-calendar-plus text-pink-400"></i>
+                <span>{{ 'Event bearbeiten' if mode == 'edit' else 'Neues Event' }}</span>
+            </h1>
+            <p class="text-sm text-gray-500 mt-1">Veranstaltung anlegen und benötigte Geräte auswählen</p>
+        </div>
+        <a href="{{ base_path }}/events"
+           class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+            <i class="fas fa-arrow-left mr-2"></i>Zurück
+        </a>
+    </div>
+
+    <form method="POST" id="eventForm" class="space-y-6">
+        <!-- Grunddaten -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6">
+            <h2 class="text-sm font-medium text-gray-300 mb-4 flex items-center gap-2">
+                <i class="fas fa-info-circle text-blue-400"></i>Grunddaten
+            </h2>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                    <label class="block text-xs text-gray-400 mb-2" for="event_name">Veranstaltungsname *</label>
+                    <input type="text" id="event_name" name="name" required
+                           value="{{ event.name if event else '' }}"
+                           placeholder="z. B. Sommerkonzert"
+                           class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-400 mb-2" for="event_organizer">Externer Veranstalter (optional)</label>
+                    <input type="text" id="event_organizer" name="organizer"
+                           value="{{ event.organizer or '' if event else '' }}"
+                           placeholder="z. B. Stadtwerke"
+                           class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <span class="block text-xs text-gray-400 mb-2">Lager auswählen *</span>
+                    <div id="eventLagerList" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {% for lager in lagers %}
+                        <label class="flex items-center gap-3 p-3 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer hover:border-gray-600">
+                            <input type="checkbox" name="lager_ids" value="{{ lager[0] }}"
+                                   class="event-lager-check w-4 h-4 accent-pink-500"
+                                   {% if lager[0] in selected_lager_ids %}checked{% endif %}>
+                            <span class="text-sm text-gray-200">{{ lager[1] }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-400 mb-2" for="event_start">Beginn</label>
+                    <input type="datetime-local" id="event_start" name="start_at"
+                           value="{{ event.start_at[:16]|replace(' ', 'T') if event and event.start_at else '' }}"
+                           class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-400 mb-2" for="event_end">Ende (optional)</label>
+                    <input type="datetime-local" id="event_end" name="end_at"
+                           value="{{ event.end_at[:16]|replace(' ', 'T') if event and event.end_at else '' }}"
+                           class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label class="block text-xs text-gray-400 mb-2" for="event_description">Beschreibung</label>
+                    <textarea id="event_description" name="description" rows="3"
+                              placeholder="Ablauf, Hinweise, Aufbauort…"
+                              class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none">{{ event.description or '' if event else '' }}</textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Kontaktpersonen -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h2 class="text-sm font-medium text-gray-300 flex items-center gap-2">
+                    <i class="fas fa-address-book text-emerald-400"></i>Kontaktpersonen
+                </h2>
+                <button type="button" id="addContactBtn"
+                        class="inline-flex items-center px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-xs">
+                    <i class="fas fa-plus mr-2"></i>Kontakt hinzufügen
+                </button>
+            </div>
+            <div id="contactsContainer" class="space-y-3"></div>
+            <p class="text-xs text-gray-600 mt-3">Name erforderlich, E-Mail optional.</p>
+        </div>
+
+        <!-- Geräteauswahl -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6">
+            <h2 class="text-sm font-medium text-gray-300 mb-1 flex items-center gap-2">
+                <i class="fas fa-boxes-stacked text-pink-400"></i>Cases &amp; Geräte
+            </h2>
+            <p class="text-xs text-gray-500 mb-4">
+                Wähle ein oder mehrere Lager. Cases übernehmen automatisch ihre Geräte; Barcodes lassen sich per Kamera oder Eingabe hinzufügen.
+            </p>
+
+            <div id="selectionStatus" class="text-sm text-gray-500">
+                Bitte ein Lager auswählen.
+            </div>
+
+            <div id="selectionArea" class="hidden space-y-5">
+                <div class="flex flex-wrap gap-2 items-center">
+                    <input type="text" id="eventBarcodeInput" placeholder="Geräte- oder Case-Barcode eingeben"
+                           class="flex-1 min-w-[220px] bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-pink-500 focus:outline-none">
+                    <button type="button" id="eventBarcodeAdd" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                        <i class="fas fa-plus mr-1"></i>Hinzufügen
+                    </button>
+                    <button type="button" id="eventScanStart" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg text-sm">
+                        <i class="fas fa-qrcode mr-1"></i>QR scannen
+                    </button>
+                </div>
+                <div id="eventQrReader" class="hidden max-w-sm"></div>
+                <p id="eventBarcodeStatus" class="text-xs text-gray-500" aria-live="polite"></p>
+                <div>
+                    <h3 class="text-xs uppercase tracking-widest text-gray-500 mb-3">Cases</h3>
+                    <div id="casesContainer" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                </div>
+
+                <div>
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                        <h3 class="text-xs uppercase tracking-widest text-gray-500">Geräte</h3>
+                        <input type="text" id="deviceSearch" placeholder="Geräte filtern…"
+                               class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 focus:border-pink-500 focus:outline-none">
+                    </div>
+                    <div id="devicesContainer" class="space-y-2 max-h-[60vh] overflow-y-auto pr-1"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3">
+            <button type="submit"
+                    class="flex-1 bg-pink-600 hover:bg-pink-700 p-3 rounded-lg font-medium transition">
+                <i class="fas fa-save mr-2"></i>{{ 'Änderungen speichern' if mode == 'edit' else 'Event erstellen' }}
+            </button>
+            <a href="{{ base_path }}/events"
+               class="flex-1 text-center bg-gray-800 hover:bg-gray-700 border border-gray-700 p-3 rounded-lg transition">
+                Abbrechen
+            </a>
+        </div>
+    </form>
+</div>
+
+<script>
+const EVENT_INITIAL = {
+    lagerIds: {{ selected_lager_ids|tojson }},
+    caseIds: {{ selected_case_ids|tojson }},
+    devices: {{ selected_devices|tojson }},
+    contacts: {{ contacts|tojson }}
+};
+</script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function () {
+ const status=document.getElementById('selectionStatus'), area=document.getElementById('selectionArea'), casesBox=document.getElementById('casesContainer'), devicesBox=document.getElementById('devicesContainer'), contactsBox=document.getElementById('contactsContainer'), barcodeInput=document.getElementById('eventBarcodeInput'), barcodeStatus=document.getElementById('eventBarcodeStatus'), lagerChecks=[...document.querySelectorAll('.event-lager-check')], dataByLager=new Map();
+ let state={cases:new Set(),devices:new Map()}, scanner=null, searchTerm='';
+ const key=(l,id)=>`${l}:${id}`, selected=()=>lagerChecks.filter(x=>x.checked).map(x=>x.value), lagerName=id=>lagerChecks.find(x=>x.value===String(id))?.closest('label').innerText.trim()||id;
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const badge=s=>!s||s==='verfügbar'?'':`<small class="${s==='defekt'?'text-red-400':'text-purple-300'}">${esc(s)}</small>`;
+ function addContact(n,e){const r=document.createElement('div');r.className='contact-row flex flex-col sm:flex-row gap-2';r.innerHTML=`<input name="contact_name" value="${esc(n||'')}" placeholder="Name" class="flex-1 p-2.5 bg-gray-800 rounded-lg border border-gray-700 text-sm"><input type="email" name="contact_email" value="${esc(e||'')}" placeholder="E-Mail (optional)" class="flex-1 p-2.5 bg-gray-800 rounded-lg border border-gray-700 text-sm"><button type="button" class="remove-contact px-3 py-2 border border-gray-700 rounded-lg text-red-400">×</button>`;contactsBox.appendChild(r);}
+ document.getElementById('addContactBtn').addEventListener('click',()=>addContact('','')); contactsBox.addEventListener('click',e=>{if(e.target.closest('.remove-contact')){e.target.closest('.contact-row').remove();if(!contactsBox.children.length)addContact('','');}});
+ const allCases=()=>selected().flatMap(l=>(dataByLager.get(l)?.cases||[]).map(x=>({...x,lager_id:l}))), allDevices=()=>selected().flatMap(l=>(dataByLager.get(l)?.devices||[]).map(x=>({...x,lager_id:l})));
+ function syncCases(){allCases().forEach(c=>{const ck=key(c.lager_id,c.id);if(c.device_ids.length&&c.device_ids.every(id=>state.devices.has(key(c.lager_id,id))))state.cases.add(ck);else state.cases.delete(ck);});}
+ function groupDevices(ds){
+   const groups=new Map();
+   ds.forEach(d=>{
+     const gk=`${d.lager_id}:${d.name}:${d.case_id??''}`;
+     if(!groups.has(gk))groups.set(gk,{key:gk,lager_id:d.lager_id,name:d.name,case_name:d.case_name,devices:[]});
+     groups.get(gk).devices.push(d);
+   });
+   return [...groups.values()];
+ }
+ function groupStock(group){return group.devices.reduce((sum,d)=>sum+(d.quantity||1),0);}
+ function groupQty(group){return group.devices.reduce((sum,d)=>sum+(state.devices.get(key(group.lager_id,d.id))||0),0);}
+ function setGroupQty(group,qty){
+   let remaining=Math.max(0,Math.min(Number(qty)||0,groupStock(group)));
+   group.devices.forEach(d=>{const dk=key(group.lager_id,d.id);const take=Math.min(remaining,d.quantity||1);if(take>0)state.devices.set(dk,take);else state.devices.delete(dk);remaining-=take;});
+   syncCases();
+ }
+ function render(){
+   const cs=allCases(),ds=allDevices();
+   casesBox.innerHTML=cs.length?cs.map(c=>{const ck=key(c.lager_id,c.id),yes=state.cases.has(ck),blocked=c.status==='defekt'||c.has_defect;return `<label class="flex gap-3 p-3 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer"><input type="checkbox" name="case_ids" value="${esc(ck)}" data-lager="${esc(c.lager_id)}" data-id="${c.id}" class="case-check accent-pink-500" ${yes?'checked':''} ${!yes&&blocked?'disabled':''}><span class="text-sm">${esc(c.name)} <small class="text-pink-300">${esc(lagerName(c.lager_id))}</small><br><small class="font-mono text-gray-500">${esc(c.barcode||'')}</small> ${badge(c.status)}${c.has_defect?'<small class="block text-red-400">Enthält defektes Gerät</small>':''}<small class="block text-gray-500">${c.device_ids.length} Geräte</small></span></label>`;}).join(''):'<p class="text-sm text-gray-500">Keine Cases in den ausgewählten Lagern.</p>';
+   const filtered=ds.filter(d=>!searchTerm||[d.name,d.barcode,d.case_name,lagerName(d.lager_id)].some(v=>String(v||'').toLowerCase().includes(searchTerm)));
+   const groups=groupDevices(filtered);
+   devicesBox.innerHTML=groups.length?groups.map(g=>{
+     const stock=groupStock(g),qty=groupQty(g),all=stock>0&&qty>=stock,defective=g.devices.filter(d=>d.status==='defekt').length;
+     const barcodes=g.devices.map(d=>d.barcode).filter(Boolean).join(', ');
+     const hidden=g.devices.map(d=>{const q=state.devices.get(key(g.lager_id,d.id));return q?`<input type="hidden" name="device_ids" value="${esc(g.lager_id+':'+d.id)}"><input type="hidden" name="quantity_${esc(g.lager_id)}_${d.id}" value="${q}">`:'';}).join('');
+     return `<div class="flex flex-wrap items-center gap-3 p-3 bg-gray-800 rounded-lg border border-gray-700"><label class="flex items-center gap-3 flex-1"><input type="checkbox" class="device-group-check accent-pink-500" data-group="${esc(g.key)}" ${all?'checked':''}><span class="text-sm">${esc(g.name)} <small class="text-pink-300">${esc(lagerName(g.lager_id))}</small><br><small class="font-mono text-gray-500">${esc(barcodes)}</small><small class="block text-gray-500">Bestand: ${stock}${g.devices.length>1?` · ${g.devices.length} IDs`:''}${qty?` · ausgewählt: ${qty}`:''}</small>${g.case_name?`<small class="block text-gray-500">Case: ${esc(g.case_name)}</small>`:''}${defective?`<small class="block text-red-400">${defective} defekt</small>`:''}</span></label><label class="text-xs">Menge <input type="number" class="device-group-qty w-20 p-2 bg-gray-900 rounded border border-gray-700 text-center" data-group="${esc(g.key)}" min="0" max="${stock}" value="${qty||stock}" ${qty?'':'disabled'}></label>${hidden}</div>`;
+   }).join(''):'<p class="text-sm text-gray-500">Keine passenden Geräte.</p>';
+   devicesBox.querySelectorAll('.device-group-check').forEach(x=>{const g=groups.find(z=>z.key===x.dataset.group);if(!g)return;const stock=groupStock(g),qty=groupQty(g);x.indeterminate=qty>0&&qty<stock;});
+   casesBox.querySelectorAll('.case-check').forEach(x=>x.addEventListener('change',e=>{const l=e.target.dataset.lager,id=Number(e.target.dataset.id),c=dataByLager.get(l)?.cases.find(z=>z.id===id);if(!c)return;if(e.target.checked){state.cases.add(key(l,id));c.device_ids.forEach(i=>{const d=dataByLager.get(l).devices.find(z=>z.id===i);if(d)state.devices.set(key(l,i),d.quantity);});}else{state.cases.delete(key(l,id));c.device_ids.forEach(i=>state.devices.delete(key(l,i)));}render();}));
+   devicesBox.querySelectorAll('.device-group-check').forEach(x=>x.addEventListener('change',e=>{const g=groups.find(z=>z.key===x.dataset.group);if(!g)return;setGroupQty(g,e.target.checked?groupStock(g):0);render();}));
+   devicesBox.querySelectorAll('.device-group-qty').forEach(x=>x.addEventListener('change',e=>{const g=groups.find(z=>z.key===x.dataset.group);if(!g)return;setGroupQty(g,e.target.value);render();}));
+ }
+ async function loadSelected(initial=false){const ids=selected(),valid=new Set(ids);for(const k of [...state.cases])if(!valid.has(k.split(':')[0]))state.cases.delete(k);for(const k of [...state.devices.keys()])if(!valid.has(k.split(':')[0]))state.devices.delete(k);if(!ids.length){status.textContent='Bitte mindestens ein Lager auswählen.';status.classList.remove('hidden');area.classList.add('hidden');dataByLager.clear();return;}status.textContent='Lade Cases und Geräte…';status.classList.remove('hidden');area.classList.add('hidden');try{await Promise.all(ids.map(async l=>{const r=await fetch(`${BASE_PATH}/events/lager/${encodeURIComponent(l)}/data`);if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b.error||'Lagerdaten konnten nicht geladen werden.');}dataByLager.set(l,await r.json());}));for(const l of [...dataByLager.keys()])if(!valid.has(l))dataByLager.delete(l);if(initial){(EVENT_INITIAL.caseIds||[]).forEach(k=>state.cases.add(String(k)));Object.entries(EVENT_INITIAL.devices||{}).forEach(([k,v])=>state.devices.set(String(k),Number(v)));}status.classList.add('hidden');area.classList.remove('hidden');render();}catch(e){status.textContent=e.message;status.classList.remove('hidden');area.classList.add('hidden');}}
+ function addBarcode(code){code=String(code||'').trim();for(const l of selected()){const data=dataByLager.get(l);if(!data)continue;const c=data.cases.find(x=>x.barcode===code);if(c){state.cases.add(key(l,c.id));c.device_ids.forEach(id=>{const d=data.devices.find(x=>x.id===id);if(d)state.devices.set(key(l,id),d.quantity);});barcodeStatus.textContent=`Case „${c.name}“ aus ${lagerName(l)} hinzugefügt.`;render();return true;}const d=data.devices.find(x=>x.barcode===code);if(d){state.devices.set(key(l,d.id),d.quantity);syncCases();barcodeStatus.textContent=`Gerät „${d.name}“ aus ${lagerName(l)} hinzugefügt.`;render();return true;}}barcodeStatus.textContent=`Barcode „${code}“ wurde in den ausgewählten Lagern nicht gefunden.`;return false;}
+ document.getElementById('eventBarcodeAdd').addEventListener('click',()=>{addBarcode(barcodeInput.value);barcodeInput.select();});barcodeInput.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addBarcode(barcodeInput.value);barcodeInput.select();}});
+ document.getElementById('eventScanStart').addEventListener('click',async()=>{if(!window.Html5Qrcode){barcodeStatus.textContent='QR-Scanner konnte nicht geladen werden.';return;}const reader=document.getElementById('eventQrReader');reader.classList.remove('hidden');try{scanner=scanner||new Html5Qrcode('eventQrReader');await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:180}},async text=>{addBarcode(text);try{await scanner.stop();}catch(_){}reader.classList.add('hidden');},()=>{});}catch(e){barcodeStatus.textContent=`Kamera konnte nicht gestartet werden: ${e}`;reader.classList.add('hidden');}});
+ document.getElementById('deviceSearch').addEventListener('input',e=>{searchTerm=e.target.value.toLowerCase();render();});lagerChecks.forEach(x=>x.addEventListener('change',()=>loadSelected()));(EVENT_INITIAL.contacts||[]).forEach(c=>addContact(c.name,c.email));if(!contactsBox.children.length)addContact('','');if(selected().length)loadSelected(true);
+})();
+</script>
+{% endblock %}

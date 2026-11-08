@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="w-full pb-4">
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-3">
+                <h1 class="text-2xl sm:text-3xl font-semibold flex items-center gap-3">
+                    <i class="fas fa-calendar-alt text-pink-400"></i>
+                    <span class="truncate">{{ event.name }}</span>
+                </h1>
+                <span class="text-[10px] uppercase tracking-wide px-2 py-1 rounded-full border
+                    {% if role == 'host' %}bg-pink-500/10 border-pink-500/30 text-pink-300
+                    {% elif role == 'editor' %}bg-blue-500/10 border-blue-500/30 text-blue-300
+                    {% else %}bg-gray-800 border-gray-700 text-gray-400{% endif %}">
+                    {{ role_label }}
+                </span>
+            </div>
+            {% if event.organizer %}
+            <p class="text-sm text-gray-400 mt-2">
+                <i class="fas fa-user-tie mr-2"></i>Externer Veranstalter: {{ event.organizer }}
+            </p>
+            {% endif %}
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="{{ base_path }}/events/{{ event.id }}/material.pdf"
+               class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                <i class="fas fa-file-pdf mr-2 text-red-400"></i>Materialliste PDF
+            </a>
+            {% if can_edit %}
+            <a href="{{ base_path }}/events/{{ event.id }}/edit"
+               class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                <i class="fas fa-edit mr-2"></i>Bearbeiten
+            </a>
+            {% endif %}
+            {% if is_host %}
+            <form method="POST" action="{{ url_for('event_delete', event_id=event.id) }}"
+                  onsubmit="return confirm('Event wirklich löschen?')">
+                <button type="submit" class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-700 rounded-lg text-sm text-gray-300">
+                    <i class="fas fa-trash mr-2"></i>Löschen
+                </button>
+            </form>
+            {% endif %}
+            <a href="{{ base_path }}/events"
+               class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                <i class="fas fa-arrow-left mr-2"></i>Alle Events
+            </a>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div class="lg:col-span-2 space-y-5">
+            <!-- Termin & Lager -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h2 class="text-sm font-medium text-gray-300 mb-4 flex items-center gap-2">
+                    <i class="fas fa-clock text-blue-400"></i>Termin &amp; Lager
+                </h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <p class="text-xs text-gray-500 mb-1">Beginn</p>
+                        <p class="text-gray-200">{{ event.start_at or 'Noch kein Termin' }}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 mb-1">Ende</p>
+                        <p class="text-gray-200">{{ event.end_at or '–' }}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 mb-1">Lager</p>
+                        <p class="text-gray-200">{{ lager_name }}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 mb-1">Erstellt von</p>
+                        <p class="text-gray-200">{{ event.created_by }}</p>
+                    </div>
+                </div>
+            </div>
+
+            {% if event.description %}
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h2 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                    <i class="fas fa-align-left text-blue-400"></i>Beschreibung
+                </h2>
+                <p class="text-sm text-gray-300 whitespace-pre-wrap">{{ event.description }}</p>
+            </div>
+            {% endif %}
+
+            <!-- Geräte -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between gap-3">
+                    <h2 class="text-sm font-medium text-gray-300 flex items-center gap-2">
+                        <i class="fas fa-boxes-stacked text-pink-400"></i>Geräte
+                    </h2>
+                    <span class="text-xs text-gray-500">
+                        {{ devices|sum(attribute='quantity') }} Gerät{% if devices|sum(attribute='quantity') != 1 %}e{% endif %}
+                    </span>
+                </div>
+                {% if devices %}
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="text-gray-500 text-left">
+                            <tr>
+                                <th class="px-5 py-3 font-medium">Gerät</th>
+                                <th class="px-5 py-3 font-medium">Lager</th>
+                                <th class="px-5 py-3 font-medium">IDs / Barcodes</th>
+                                <th class="px-5 py-3 font-medium">Case</th>
+                                <th class="px-5 py-3 font-medium text-right">Menge</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-800">
+                            {% for device in devices %}
+                            <tr>
+                                <td class="px-5 py-3 text-gray-200">{{ device.name }}</td>
+                                <td class="px-5 py-3 text-xs text-gray-400">{{ device.lager_name }}</td>
+                                <td class="px-5 py-3 font-mono text-xs text-gray-500">{{ device.barcode }}</td>
+                                <td class="px-5 py-3 text-xs text-gray-500">{{ device.case_name or '–' }}</td>
+                                <td class="px-5 py-3 text-right text-gray-200">
+                                    {{ device.quantity }}
+                                    <span class="text-xs text-gray-600">/ {{ device.stock_quantity }}</span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="p-8 text-center text-sm text-gray-500">Noch keine Geräte ausgewählt.</div>
+                {% endif %}
+            </div>
+
+            <!-- Cases -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h2 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                    <i class="fas fa-toolbox text-pink-400"></i>Cases
+                </h2>
+                {% if cases %}
+                <div class="flex flex-wrap gap-2">
+                    {% for case in cases %}
+                    <span class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300">
+                        <i class="fas fa-toolbox text-pink-400"></i>{{ case.name }}
+                        <span class="text-pink-300">{{ case.lager_name }}</span>
+                        <span class="font-mono text-gray-600">{{ case.barcode }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500">Keine Cases ausgewählt.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="space-y-5">
+            <!-- Kontakte -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h2 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                    <i class="fas fa-address-book text-emerald-400"></i>Kontaktpersonen
+                </h2>
+                {% if contacts %}
+                <div class="space-y-3">
+                    {% for contact in contacts %}
+                    <div class="bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2.5">
+                        <p class="text-sm text-gray-200">{{ contact.name }}</p>
+                        {% if contact.email %}
+                        <a href="mailto:{{ contact.email }}" class="text-xs text-blue-400 hover:text-blue-300 break-all">{{ contact.email }}</a>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500">Keine Kontaktpersonen hinterlegt.</p>
+                {% endif %}
+            </div>
+
+            <!-- Anhänge -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h2 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                    <i class="fas fa-paperclip text-cyan-400"></i>Anhänge
+                    <span class="text-xs font-normal text-gray-500">Lichtplan, Patchplan usw.</span>
+                </h2>
+
+                {% if attachments %}
+                <div class="space-y-2 mb-4">
+                    {% for attachment in attachments %}
+                    <div class="bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2.5 flex items-center gap-3">
+                        {% if attachment.mimetype.startswith('image/') %}
+                        <a href="{{ url_for('event_attachment', event_id=event.id, attachment_id=attachment.id) }}" target="_blank" class="flex-shrink-0">
+                            <img src="{{ url_for('event_attachment', event_id=event.id, attachment_id=attachment.id) }}"
+                                 alt="{{ attachment.filename }}" class="w-12 h-12 rounded object-cover border border-gray-700">
+                        </a>
+                        {% else %}
+                        <a href="{{ url_for('event_attachment', event_id=event.id, attachment_id=attachment.id) }}" target="_blank"
+                           class="w-10 h-10 rounded bg-red-900/30 border border-red-800/50 flex items-center justify-center text-red-300 flex-shrink-0">
+                            <i class="fas fa-file-pdf"></i>
+                        </a>
+                        {% endif %}
+                        <div class="min-w-0 flex-1">
+                            <a href="{{ url_for('event_attachment', event_id=event.id, attachment_id=attachment.id) }}" target="_blank"
+                               class="text-sm text-gray-200 hover:text-cyan-300 truncate block">{{ attachment.filename }}</a>
+                            <p class="text-[11px] text-gray-500">{{ attachment.created_at }}{% if attachment.uploaded_by %} · {{ attachment.uploaded_by }}{% endif %}</p>
+                        </div>
+                        {% if can_edit %}
+                        <form method="POST" action="{{ url_for('event_attachment_delete', event_id=event.id, attachment_id=attachment.id) }}"
+                              onsubmit="return confirm('Anhang wirklich löschen?')">
+                            <button type="submit" class="p-1.5 text-gray-500 hover:text-red-400" title="Anhang löschen">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500 mb-4">Noch keine Anhänge vorhanden.</p>
+                {% endif %}
+
+                {% if can_edit %}
+                <form method="POST" action="{{ url_for('event_attachment_upload', event_id=event.id) }}"
+                      enctype="multipart/form-data" class="border-t border-gray-800 pt-4 space-y-2">
+                    <label class="block text-xs text-gray-500" for="event_attachment">Datei hinzufügen (PDF oder Bild, max. 20 MB)</label>
+                    <input type="file" id="event_attachment" name="attachment" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif"
+                           class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100" required>
+                    <button type="submit" class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 rounded-lg text-sm font-medium">
+                        <i class="fas fa-upload mr-2"></i>Hochladen
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+
+            <!-- Freigaben -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h2 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                    <i class="fas fa-users text-purple-400"></i>Freigaben
+                </h2>
+
+                <div class="space-y-2 mb-4">
+                    {% for permission in permissions %}
+                    <div class="bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2.5">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                                <p class="text-sm text-gray-200 truncate">{{ permission.name }}</p>
+                                <p class="text-[11px] text-gray-500 font-mono truncate">{{ permission.user_id }}</p>
+                            </div>
+                            {% if is_host %}
+                            <div class="flex items-center gap-1.5">
+                                <form method="POST" action="{{ url_for('event_permissions', event_id=event.id) }}">
+                                    <input type="hidden" name="action" value="update">
+                                    <input type="hidden" name="user_id" value="{{ permission.user_id }}">
+                                    <select name="role" onchange="this.form.submit()"
+                                            class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200">
+                                        <option value="viewer" {% if permission.role == 'viewer' %}selected{% endif %}>Teilnehmer</option>
+                                        <option value="editor" {% if permission.role == 'editor' %}selected{% endif %}>Bearbeiter</option>
+                                        <option value="host" {% if permission.role == 'host' %}selected{% endif %}>Veranstalter</option>
+                                    </select>
+                                </form>
+                                <form method="POST" action="{{ url_for('event_permissions', event_id=event.id) }}">
+                                    <input type="hidden" name="action" value="remove">
+                                    <input type="hidden" name="user_id" value="{{ permission.user_id }}">
+                                    <button type="submit" class="p-1.5 text-gray-500 hover:text-red-400" title="Freigabe entfernen">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </form>
+                            </div>
+                            {% else %}
+                            <span class="text-xs text-gray-400">
+                                {% if permission.role == 'host' %}Veranstalter
+                                {% elif permission.role == 'editor' %}Bearbeiter
+                                {% else %}Teilnehmer{% endif %}
+                            </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                {% if is_host %}
+                <form method="POST" action="{{ url_for('event_permissions', event_id=event.id) }}" class="space-y-2 border-t border-gray-800 pt-4">
+                    <input type="hidden" name="action" value="add">
+                    {% if groups %}
+                    <label class="block text-xs text-gray-500">Gruppe freigeben (alle Mitglieder)</label>
+                    <select name="group_id"
+                            class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-purple-500 focus:outline-none text-sm">
+                        <option value="">Keine Gruppe</option>
+                        {% for group in groups %}
+                        <option value="{{ group.id }}">{{ group.name }} ({{ group.member_ids|length }})</option>
+                        {% endfor %}
+                    </select>
+                    {% endif %}
+                    <label class="block text-xs text-gray-500">Oder einzelnen Benutzer freigeben</label>
+                    <select name="user_id"
+                            class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-purple-500 focus:outline-none text-sm">
+                        <option value="">Benutzer wählen…</option>
+                        {% for user in users %}
+                        <option value="{{ user[0] }}">{{ user[1] }} ({{ user[0] }})</option>
+                        {% endfor %}
+                    </select>
+                    <div class="flex gap-2">
+                        <select name="role"
+                                class="flex-1 p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-purple-500 focus:outline-none text-sm">
+                            <option value="viewer">Teilnehmer (lesen)</option>
+                            <option value="editor">Bearbeiter (bearbeiten)</option>
+                            <option value="host">Veranstalter (verwalten)</option>
+                        </select>
+                        <button type="submit" class="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium transition">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

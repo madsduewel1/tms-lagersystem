@@ -145,7 +145,7 @@ DMS/
 
 ### Erste Schritte
 1. Nach der Installation die Anwendung starten
-2. Mit einer bestehenden Benutzer-ID anmelden (Standard: CKS.EXampleid)
+2. Mit einer bestehenden Benutzer-ID anmelden (Standard: TMS-T / Passwort: TMS-T)
 3. Ein neues Lager erstellen
 4. Geräte hinzufügen und verwalten
 

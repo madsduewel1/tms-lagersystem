@@ -6,59 +6,89 @@
         <i class="fas fa-plus mr-3"></i>Gerät hinzufügen
     </h1>
     
-    <form method="POST" id="addDeviceForm" class="bg-gray-800 p-6 rounded-lg space-y-4">
+    <form method="POST" enctype="multipart/form-data" id="addDeviceForm" class="bg-gray-800 p-6 rounded-lg space-y-4">
         <input type="text" name="name" placeholder="Gerätename (optional)"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none"
                data-autofocus onkeypress="submitFormOnEnter(event, 'addDeviceForm')">
         
         <input type="text" name="lagerplatz" placeholder="Lagerplatz (z.B. A1)"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none"
                onkeypress="submitFormOnEnter(event, 'addDeviceForm')">
+
+        <input type="text" name="lagerort" placeholder="Lagerort / Raum (z. B. Musikraum)"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         
         <input type="text" name="seriennummer" placeholder="Seriennummer"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         
         <input type="text" name="modell" placeholder="Modell"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
 
         <input type="text" name="hersteller" placeholder="Hersteller"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
 
-        <input type="text" name="instrumentenart" placeholder="Instrument" list="instrumentenarten"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+        <label class="block text-sm text-gray-300">Kategorie</label>
+        <input type="text" name="instrumentenart" placeholder="Kategorie auswählen oder neu eingeben" list="instrumentenarten"
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         <datalist id="instrumentenarten">
             {% for art in instrumentenarten %}
             <option value="{{ art }}">{{ art }}</option>
             {% endfor %}
         </datalist>
         
-        <input type="text" name="inventarnummer" placeholder="Inventar-Nummer (extern)"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
-        
         <input type="date" name="kaufdatum" placeholder="Kaufdatum"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+               class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
         
-        <input type="number" name="preis" placeholder="Preis (€)" step="0.01" min="0"
-               class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input type="number" name="kaufpreis" placeholder="Kaufpreis (€)" step="0.01" min="0"
+                   class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+            <input type="number" name="mietpreis" placeholder="Mietpreis (€)" step="0.01" min="0"
+                   class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+        </div>
+
+        <details class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+            <summary class="cursor-pointer text-sm font-medium text-gray-200">DMX-Kanalbelegung (optional)</summary>
+            <p class="text-xs text-gray-400 mt-2 mb-3">Funktion pro Kanal eintragen, zum Beispiel Kanal 1 = Pan, Kanal 2 = Tilt, Kanal 3 = Dimmer.</p>
+            <div id="dmxRows" class="space-y-2">
+                <div class="dmx-row grid grid-cols-[1fr_2fr_auto] gap-2">
+                    <input type="number" name="dmx_channel" min="1" max="512" placeholder="Kanal, z. B. 1" class="w-full p-2.5 bg-gray-700 rounded">
+                    <input type="text" name="dmx_function" maxlength="100" placeholder="Funktion, z. B. Pan" class="w-full p-2.5 bg-gray-700 rounded">
+                    <button type="button" class="remove-dmx-row px-3 text-gray-400 hover:text-red-400" title="Zeile entfernen"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <button type="button" id="addDmxRow" class="mt-3 text-xs text-blue-300 hover:text-blue-200"><i class="fas fa-plus mr-1"></i>Kanal hinzufügen</button>
+        </details>
+
+        <div>
+            <label for="device_image" class="block text-sm text-gray-300 mb-2">Gerätebild (optional, JPG/PNG/WebP, max. 8 MB)</label>
+            <input type="file" id="device_image" name="bild" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100">
+        </div>
 
         <div class="flex items-center gap-2">
             <input type="checkbox" name="quantity_enabled" id="quantity_enabled" class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
-            <label for="quantity_enabled" class="text-sm text-gray-300">Menge</label>
+            <label for="quantity_enabled" class="text-sm text-gray-300">Mehrere gleiche Geräte erfassen</label>
         </div>
         <div id="quantity_input" class="hidden">
-            <input type="number" name="quantity" min="1" value="1" placeholder="Menge eingeben"
-                   class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none">
+            <input type="number" name="quantity" min="1" max="1000" value="1" placeholder="Anzahl"
+                   class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none">
+            <label class="flex items-start gap-2 mt-2 text-sm text-gray-300">
+                <input type="checkbox" name="individual_qr" id="individual_qr" checked
+                       class="w-4 h-4 mt-0.5 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
+                <span>Jedes Exemplar mit eigenem QR-Code / Barcode erfassen
+                    <span class="block text-xs text-gray-500">Für Zubehör wie Traversenschellen abwählen: Dann wird eine gemeinsame Position mit Anzahl angelegt.</span>
+                </span>
+            </label>
         </div>
 
         <textarea name="beschreibung" placeholder="Beschreibung (optional)"
-                  class="w-full p-3 bg-gray-700 rounded focus:border-blue-500 focus:outline-none h-24"></textarea>
+                  class="w-full p-3 bg-gray-700 rounded focus:border-gray-700 focus:outline-none h-24"></textarea>
         
         <button type="submit" class="w-full bg-green-600 hover:bg-green-700 p-3 rounded font-semibold transition">
             <i class="fas fa-save mr-2"></i>Speichern
         </button>
     </form>
     
-    <a href="/devices" class="block text-center mt-4 text-gray-400 hover:text-white">
+    <a href="{{ base_path }}/devices" class="block text-center mt-4 text-gray-400 hover:text-white">
         <i class="fas fa-arrow-left mr-2"></i>Zurück
     </a>
 </div>
@@ -76,6 +106,19 @@ function toggleQuantity() {
 
 document.getElementById('quantity_enabled').addEventListener('change', toggleQuantity);
 toggleQuantity(); // initial check
+
+document.getElementById('addDmxRow').addEventListener('click', () => {
+    const row = document.querySelector('.dmx-row').cloneNode(true);
+    row.querySelectorAll('input').forEach(input => input.value = '');
+    document.getElementById('dmxRows').appendChild(row);
+});
+document.getElementById('dmxRows').addEventListener('click', event => {
+    const button = event.target.closest('.remove-dmx-row');
+    if (!button) return;
+    const rows = document.querySelectorAll('.dmx-row');
+    if (rows.length > 1) button.closest('.dmx-row').remove();
+    else button.closest('.dmx-row').querySelectorAll('input').forEach(input => input.value = '');
+});
 </script>
 
 {% endblock %}

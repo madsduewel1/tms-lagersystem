@@ -10,7 +10,7 @@
         </h1>
         <p class="text-xs sm:text-base text-gray-400">Verwalten Sie Ihre Geräte und Inventar</p>
     </div>
-    <a href="/lager/{{ session['current_lager'] }}" 
+    <a href="{{ base_path }}/lager/{{ session['current_lager'] }}" 
        class="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-gray-800 hover:bg-gray-700 active:bg-gray-600 rounded-lg sm:rounded-xl transition-colors border border-gray-700 touch-manipulation text-sm sm:text-base">
         <i class="fas fa-arrow-left text-gray-400 text-xs sm:text-sm"></i>
         <span class="text-gray-300">Zurück</span>
@@ -38,7 +38,7 @@
                 <i class="fas fa-search mr-1 text-blue-400"></i>Suche
             </label>
             <input type="text" id="search-input" value="{{ search }}" placeholder="Geräte suchen..."
-                   class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-blue-500 focus:outline-none transition text-gray-100 text-sm sm:text-base">
+                   class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-gray-700 focus:outline-none transition text-gray-100 text-sm sm:text-base">
         </div>
         
         <!-- Status -->
@@ -46,36 +46,37 @@
             <label class="block text-xs sm:text-sm font-medium text-gray-300 mb-1.5 sm:mb-2">
                 <i class="fas fa-info-circle mr-1 text-green-400"></i>Status
             </label>
-            <select id="status-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-blue-500 focus:outline-none transition text-gray-100 text-sm sm:text-base">
+            <select id="status-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-gray-700 focus:outline-none transition text-gray-100 text-sm sm:text-base">
                 <option value="">Alle Status</option>
                 <option value="verfügbar" {% if "verfügbar" in status_filters %}selected{% endif %}>Verfügbar</option>
                 <option value="ausgeliehen" {% if "ausgeliehen" in status_filters %}selected{% endif %}>Ausgeliehen</option>
+                <option value="zugewiesen" {% if "zugewiesen" in status_filters %}selected{% endif %}>Zugewiesen</option>
                 <option value="defekt" {% if "defekt" in status_filters %}selected{% endif %}>Defekt</option>
             </select>
         </div>
         
-        <!-- Instrument -->
+        <!-- Kategorie -->
         <div>
             <label class="block text-xs sm:text-sm font-medium text-gray-300 mb-1.5 sm:mb-2">
-                <i class="fas fa-tag mr-1 text-purple-400"></i>Instrument
+                <i class="fas fa-tag mr-1 text-purple-400"></i>Kategorie
             </label>
-            <select id="art-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-blue-500 focus:outline-none transition text-gray-100 text-sm sm:text-base">
-                <option value="">Alle Instrumente</option>
+            <select id="art-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-gray-700 focus:outline-none transition text-gray-100 text-sm sm:text-base">
+                <option value="">Alle Kategorien</option>
                 {% for art in instrumentenarten %}
                 <option value="{{ art }}" {% if art in art_filters %}selected{% endif %}>{{ art }}</option>
                 {% endfor %}
             </select>
         </div>
         
-        <!-- Klasse -->
+        <!-- Lagerort -->
         <div>
             <label class="block text-xs sm:text-sm font-medium text-gray-300 mb-1.5 sm:mb-2">
-                <i class="fas fa-graduation-cap mr-1 text-orange-400"></i>Klasse
+                <i class="fas fa-map-marker-alt mr-1 text-orange-400"></i>Lagerort / Raum
             </label>
-            <select id="klasse-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-blue-500 focus:outline-none transition text-gray-100 text-sm sm:text-base">
-                <option value="">Alle Klassen</option>
-                {% for klasse in klassen %}
-                <option value="{{ klasse }}" {% if klasse in klasse_filters %}selected{% endif %}>{{ klasse }}</option>
+            <select id="klasse-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-gray-700 focus:outline-none transition text-gray-100 text-sm sm:text-base">
+                <option value="">Alle Lagerorte</option>
+                {% for lagerort in lagerorte %}
+                <option value="{{ lagerort }}" {% if lagerort in klasse_filters %}selected{% endif %}>{{ lagerort }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -85,10 +86,10 @@
             <label class="block text-xs sm:text-sm font-medium text-gray-300 mb-1.5 sm:mb-2">
                 <i class="fas fa-sort mr-1 text-yellow-400"></i>Sortieren
             </label>
-            <select id="sort-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-blue-500 focus:outline-none transition text-gray-100 text-sm sm:text-base">
+            <select id="sort-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-gray-700 focus:outline-none transition text-gray-100 text-sm sm:text-base">
                 <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
                 <option value="model" {% if sort_by == 'model' %}selected{% endif %}>Modell</option>
-                <option value="instrumentenart" {% if sort_by == 'instrumentenart' %}selected{% endif %}>Instrumentenart</option>
+                <option value="category" {% if sort_by in ('category', 'instrumentenart') %}selected{% endif %}>Kategorie</option>
                 <option value="lagerplatz" {% if sort_by == 'lagerplatz' %}selected{% endif %}>Lagerplatz</option>
                 <option value="status" {% if sort_by == 'status' %}selected{% endif %}>Status</option>
             </select>
@@ -99,11 +100,10 @@
             <label class="block text-xs sm:text-sm font-medium text-gray-300 mb-1.5 sm:mb-2">
                 <i class="fas fa-layer-group mr-1 text-pink-400"></i>Gruppierung
             </label>
-            <select id="group-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-blue-500 focus:outline-none transition text-gray-100 text-sm sm:text-base">
-                <option value="none" {% if not group_by or group_by == 'none' %}selected{% endif %}>Keine</option>
+            <select id="group-select" class="w-full p-2.5 sm:p-3 bg-gray-800 rounded-lg sm:rounded-xl border border-gray-700 focus:border-gray-700 focus:outline-none transition text-gray-100 text-sm sm:text-base">
+                <option value="none" {% if not group_by or group_by == 'none' %}selected{% endif %}>Nach Gerät</option>
                 <option value="model" {% if group_by == 'model' %}selected{% endif %}>Nach Modell</option>
-                <option value="instrument" {% if group_by == 'instrument' %}selected{% endif %}>Nach Instrument</option>
-                <option value="serial" {% if group_by == 'serial' %}selected{% endif %}>Nach Seriennummer</option>
+                <option value="category" {% if group_by in ('category', 'instrument') %}selected{% endif %}>Nach Kategorie</option>
                 <option value="status" {% if group_by == 'status' %}selected{% endif %}>Nach Status</option>
             </select>
         </div>
@@ -112,38 +112,95 @@
 
 <!-- Action Buttons -->
 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
-    <a href="/add_device" class="group relative overflow-hidden bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 active:from-green-800 active:to-green-900 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 shadow-card hover:shadow-card-hover touch-manipulation">
-        <div class="absolute inset-0 bg-gradient-to-r from-green-400 to-green-500 opacity-0 group-hover:opacity-20 transition-opacity"></div>
+    <a href="{{ base_path }}/add_device" class="group relative overflow-hidden bg-gray-700 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 -hover touch-manipulation">
+        <div class="absolute inset-0 bg-gray-700 hidden"></div>
         <div class="relative text-sm sm:text-base">
             <i class="fas fa-plus mr-1 sm:mr-2"></i>Neues Gerät
         </div>
     </a>
     
-    <a href="/label-layout" class="group relative overflow-hidden bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 active:from-orange-800 active:to-orange-900 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 shadow-card hover:shadow-card-hover touch-manipulation">
-        <div class="absolute inset-0 bg-gradient-to-r from-orange-400 to-orange-500 opacity-0 group-hover:opacity-20 transition-opacity"></div>
+    <a href="{{ base_path }}/label-layout" class="group relative overflow-hidden bg-gray-700 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 -hover touch-manipulation">
+        <div class="absolute inset-0 bg-gray-700 hidden"></div>
         <div class="relative text-sm sm:text-base">
             <i class="fas fa-paint-brush mr-1 sm:mr-2"></i>Label Editor
         </div>
     </a>
     
-    <a href="/export?format=csv&search={{ search }}&status={{ ','.join(status_filters) }}&art={{ ','.join(art_filters) }}&klasse={{ ','.join(klasse_filters) }}" 
-       class="group relative overflow-hidden bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 active:from-blue-800 active:to-blue-900 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 shadow-card hover:shadow-card-hover touch-manipulation">
-        <div class="absolute inset-0 bg-gradient-to-r from-blue-400 to-blue-500 opacity-0 group-hover:opacity-20 transition-opacity"></div>
+    <a href="{{ base_path }}/export?format=csv&search={{ search|urlencode }}&status={{ status_filters|join(',')|urlencode }}&art={{ art_filters|join(',')|urlencode }}&lagerort={{ klasse_filters|join(',')|urlencode }}" 
+       class="group relative overflow-hidden bg-gray-700 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 -hover touch-manipulation">
+        <div class="absolute inset-0 bg-gray-700 hidden"></div>
         <div class="relative text-sm sm:text-base">
             <i class="fas fa-file-csv mr-1 sm:mr-2"></i>Export CSV
         </div>
     </a>
     
-    <a href="/export?format=pdf_labels&search={{ search }}&status={{ ','.join(status_filters) }}&art={{ ','.join(art_filters) }}&klasse={{ ','.join(klasse_filters) }}" 
-       class="group relative overflow-hidden bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 active:from-purple-800 active:to-purple-900 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 shadow-card hover:shadow-card-hover touch-manipulation">
-        <div class="absolute inset-0 bg-gradient-to-r from-purple-400 to-purple-500 opacity-0 group-hover:opacity-20 transition-opacity"></div>
+    <a id="selected-label-export" href="{{ base_path }}/export?format=pdf_labels" 
+       class="group relative overflow-hidden bg-gray-700 p-3 sm:p-4 rounded-lg sm:rounded-2xl text-center font-semibold transition-all duration-300 -hover touch-manipulation">
+        <div class="absolute inset-0 bg-gray-700 hidden"></div>
         <div class="relative text-sm sm:text-base">
-            <i class="fas fa-tags mr-1 sm:mr-2"></i>PDF Etiketten
+            <i class="fas fa-tags mr-1 sm:mr-2"></i>Etiketten für Auswahl
         </div>
     </a>
 </div>
 
-<!-- Device List -->
+<!-- Device list: one product card, with separately tracked copies underneath. -->
+<div id="device-list" class="space-y-4">
+    {% for section_name, product_groups in grouped_device_groups.items() %}
+    {% if group_by != 'none' %}<h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 pt-3">{{ section_name }}</h2>{% endif %}
+    {% for product_group in product_groups %}
+    {% set exemplar = product_group.devices[0] %}
+    <details class="group glass-effect rounded-xl sm:rounded-2xl border border-gray-800 overflow-hidden" open>
+        <summary class="p-4 sm:p-5 cursor-pointer list-none">
+            <div class="flex items-start gap-3">
+                {% if exemplar[20] %}<img src="{{ url_for('device_image', device_id=exemplar[0]) }}" alt="" class="w-12 h-12 rounded-lg object-cover border border-gray-700 flex-shrink-0">{% endif %}
+                <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h3 class="font-semibold text-gray-100 text-base sm:text-lg">{{ exemplar[1] }}</h3>
+                        {% set unit_count = product_group.devices|sum(attribute=12) %}
+                        <span class="px-2 py-1 rounded-full text-xs bg-blue-600/20 text-blue-300">{{ unit_count }} Exemplar{% if unit_count != 1 %}e{% endif %}</span>
+                        <label class="ml-auto inline-flex items-center gap-1.5 text-xs text-gray-400" onclick="event.stopPropagation()">
+                            <input type="checkbox" class="group-label-toggle accent-pink-500">
+                            Alle Etiketten
+                        </label>
+                        <a href="{{ base_path }}/devices/group_edit?ids={% for device in product_group.devices %}{{ device[0] }}{% if not loop.last %},{% endif %}{% endfor %}"
+                           onclick="event.stopPropagation()"
+                           class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-300">
+                            <i class="fas fa-pen-to-square"></i>Gruppe bearbeiten
+                        </a>
+                    </div>
+                    <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs sm:text-sm text-gray-400">
+                        <div><i class="fas fa-door-open mr-2 text-orange-400"></i>Raum: {{ exemplar[14] or '—' }}</div>
+                        <div><i class="fas fa-map-marker-alt mr-2 text-green-400"></i>Lagerplatz: {{ exemplar[3] or '—' }}</div>
+                        <div><i class="fas fa-cog mr-2 text-purple-400"></i>Modell: {{ exemplar[7] or '—' }}</div>
+                        <div><i class="fas fa-tag mr-2 text-orange-400"></i>Kategorie: {{ exemplar[8] or '—' }}</div>
+                        <div><i class="fas fa-euro-sign mr-2 text-yellow-400"></i>Kauf: {{ exemplar[11] or 0 }} € · Miete: {{ exemplar[15] or 0 }} €</div>
+                    </div>
+                    {% if dmx_profiles.get(exemplar[0]) %}<div class="mt-2 text-xs text-purple-300"><i class="fas fa-lightbulb mr-1"></i>DMX: {% for item in dmx_profiles.get(exemplar[0]) %}<span class="inline-block mr-2">{{ item.channel }} = {{ item.function }}</span>{% endfor %}</div>{% endif %}
+                </div>
+                <span class="group-chevron text-gray-500 pt-1"><i class="fas fa-chevron-down"></i></span>
+            </div>
+        </summary>
+        <div class="border-t border-gray-800 divide-y divide-gray-800">
+            {% for device in product_group.devices %}
+            <div class="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                <span class="text-gray-500 w-24 flex-shrink-0">Exemplar {{ loop.index }}</span>
+                <span class="font-mono text-gray-300">ID {{ device[0] }}</span>
+                {% if device[12] and device[12] > 1 %}<span class="text-xs text-gray-400">Menge: {{ device[12] }}</span>{% endif %}
+                <span class="font-mono text-xs text-gray-500">Barcode {{ device[2] }}</span>
+                {% if device[6] %}<span class="text-xs text-gray-500">SN {{ device[6] }}</span>{% endif %}
+                <span class="px-2 py-0.5 rounded-lg text-xs border border-gray-700/50 {% if device[4] == 'verfügbar' %}bg-green-600/20 text-green-400{% elif device[4] == 'defekt' %}bg-red-600/20 text-red-400{% elif device[4] == 'zugewiesen' %}bg-purple-600/20 text-purple-300{% else %}bg-yellow-600/20 text-yellow-400{% endif %}">{{ device[4] or 'verfügbar' }}</span>
+                <label class="inline-flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" class="label-select accent-pink-500" value="{{ device[0] }}">Etikett</label>
+                <a href="{{ base_path }}/edit_device/{{ device[0] }}" class="text-blue-400 hover:text-blue-300" title="Dieses Exemplar bearbeiten"><i class="fas fa-edit"></i></a>
+                <a href="{{ base_path }}/delete_device/{{ device[0] }}" class="text-red-400 hover:text-red-300" title="Dieses Exemplar löschen" onclick="return confirm('Gerät löschen?')"><i class="fas fa-trash"></i></a>
+            </div>
+            {% endfor %}
+        </div>
+    </details>
+    {% endfor %}
+    {% else %}<div class="p-8 text-center text-gray-500">Keine Geräte entsprechen den gewählten Filtern.</div>{% endfor %}
+</div>
+
+{# Previous per-unit markup retained as a Jinja comment for reference.
 <div id="device-list">
     {% if grouped_devices and group_by != 'none' %}
         {% for group_name, group_devices in grouped_devices.items() %}
@@ -153,14 +210,23 @@
                     <div class="flex items-center space-x-2 sm:space-x-3 flex-1 min-w-0">
                         <i id="group-icon-{{ loop.index }}" class="fas fa-chevron-down text-blue-400 transition-transform text-sm sm:text-base flex-shrink-0"></i>
                         <h3 class="text-sm sm:text-lg font-semibold text-gray-100 truncate">{{ group_name }}</h3>
-                        <span class="px-2 sm:px-3 py-0.5 sm:py-1 bg-blue-600 text-blue-100 rounded-full text-xs sm:text-sm font-medium flex-shrink-0">({{ group_devices|length }})</span>
+                        <span class="px-2 sm:px-3 py-0.5 sm:py-1 bg-blue-600 text-blue-100 rounded-full text-xs sm:text-sm font-medium flex-shrink-0">({{ group_devices|sum(attribute=12) }} Stück)</span>
                     </div>
                     <div class="text-xs sm:text-sm text-gray-400 hidden sm:block">
-                        {% set available_count = group_devices | selectattr('4', 'equalto', 'verfügbar') | list | length %}
-                        {% set borrowed_count = group_devices | length - available_count %}
-                        <span class="text-green-400">{{ available_count }} verfügbar</span>
-                        {% if borrowed_count > 0 %}
-                        <span class="ml-2 text-red-400">{{ borrowed_count }} ausgeliehen</span>
+                        {% set total_qty = group_devices | sum(attribute=12) %}
+                        {% set available_qty = group_devices | selectattr('4', 'equalto', 'verfügbar') | list | sum(attribute=12) %}
+                        {% set assigned_qty = group_devices | selectattr('4', 'equalto', 'zugewiesen') | list | sum(attribute=12) %}
+                        {% set defect_qty = group_devices | selectattr('4', 'equalto', 'defekt') | list | sum(attribute=12) %}
+                        {% set borrowed_qty = total_qty - available_qty - assigned_qty - defect_qty %}
+                        <span class="text-green-400">{{ available_qty }} verfügbar</span>
+                        {% if borrowed_qty > 0 %}
+                        <span class="ml-2 text-yellow-400">{{ borrowed_qty }} ausgeliehen</span>
+                        {% endif %}
+                        {% if assigned_qty > 0 %}
+                        <span class="ml-2 text-purple-300">{{ assigned_qty }} zugewiesen</span>
+                        {% endif %}
+                        {% if defect_qty > 0 %}
+                        <span class="ml-2 text-red-400">{{ defect_qty }} defekt</span>
                         {% endif %}
                     </div>
                 </div>
@@ -172,27 +238,35 @@
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                         <div class="flex-1 w-full sm:w-auto">
                             <div class="flex items-center space-x-2 sm:space-x-3 mb-2">
+                                {% if device[20] %}<img src="{{ url_for('device_image', device_id=device[0]) }}" alt="" class="w-10 h-10 rounded object-cover border border-gray-700">{% endif %}
                                 <h4 class="font-semibold text-gray-100 text-sm sm:text-base truncate">{{ device[1] }}</h4>
-                                <span class="px-2 py-0.5 sm:py-1 rounded-lg text-xs font-medium flex-shrink-0
-                                    {% if device[4] == 'verfügbar' %}bg-green-600/20 text-green-400 border border-green-600/30{% else %}bg-red-600/20 text-red-400 border border-red-600/30{% endif %}">
+                                <span class="px-2 py-0.5 sm:py-1 rounded-lg text-xs font-medium flex-shrink-0 border border-gray-700/30
+                                    {% if device[4] == 'verfügbar' %}bg-green-600/20 text-green-400
+                                    {% elif device[4] == 'defekt' %}bg-red-600/20 text-red-400
+                                    {% elif device[4] == 'zugewiesen' %}bg-purple-600/20 text-purple-300
+                                    {% else %}bg-yellow-600/20 text-yellow-400{% endif %}">
                                     {{ device[4] }}
                                 </span>
                             </div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 text-xs sm:text-sm text-gray-400">
+                                <label class="inline-flex items-center gap-2"><input type="checkbox" class="label-select accent-pink-500" value="{{ device[0] }}">Etikett</label>
                                 <div class="truncate"><i class="fas fa-barcode mr-1 sm:mr-2 text-blue-400"></i>{{ device[2] }}</div>
-                                <div class="truncate"><i class="fas fa-map-marker-alt mr-1 sm:mr-2 text-green-400"></i>{{ device[3] }}</div>
+                                <div class="truncate"><i class="fas fa-map-marker-alt mr-1 sm:mr-2 text-green-400"></i>Platz: {{ device[3] }}</div>
+                                <div class="truncate"><i class="fas fa-door-open mr-1 sm:mr-2 text-orange-400"></i>Raum: {{ device[14] or '—' }}</div>
                                 <div class="truncate"><i class="fas fa-cog mr-1 sm:mr-2 text-purple-400"></i>{{ device[7] or 'N/A' }}</div>
                                 <div class="truncate"><i class="fas fa-tag mr-1 sm:mr-2 text-orange-400"></i>{{ device[8] or 'N/A' }}</div>
                                 <div class="truncate"><i class="fas fa-hashtag mr-1 sm:mr-2 text-red-400"></i>{{ device[6] or 'N/A' }}</div>
-                                <div class="truncate"><i class="fas fa-warehouse mr-1 sm:mr-2 text-red-400"></i>{{ device[9] or 'N/A' }}</div>
+                                <div class="truncate"><i class="fas fa-euro-sign mr-1 sm:mr-2 text-yellow-400"></i>Kauf: {{ device[11] or 0 }} € · Miete: {{ device[15] or 0 }} €</div>
+                                <div class="truncate"><i class="fas fa-cubes mr-1 sm:mr-2 text-yellow-400"></i>Menge: {{ device[12] or 1 }}</div>
+                                {% if dmx_profiles.get(device[0]) %}<div class="sm:col-span-2 text-purple-300"><i class="fas fa-lightbulb mr-1 sm:mr-2"></i>DMX: {% for item in dmx_profiles.get(device[0]) %}<span class="inline-block mr-2">{{ item.channel }} = {{ item.function }}</span>{% endfor %}</div>{% endif %}
                             </div>
                         </div>
                         <div class="flex items-center space-x-2 sm:space-x-3 w-full sm:w-auto justify-end">
-                            <a href="/edit_device/{{ device[0] }}" 
+                            <a href="{{ base_path }}/edit_device/{{ device[0] }}" 
                                class="flex-1 sm:flex-none p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-600/20 active:bg-blue-600/30 rounded-lg transition-colors touch-manipulation text-center">
                                 <i class="fas fa-edit"></i>
                             </a>
-                            <a href="/delete_device/{{ device[0] }}" 
+                            <a href="{{ base_path }}/delete_device/{{ device[0] }}" 
                                class="flex-1 sm:flex-none p-2 text-red-400 hover:text-red-300 hover:bg-red-600/20 active:bg-red-600/30 rounded-lg transition-colors touch-manipulation text-center"
                                onclick="return confirm('Gerät löschen?')">
                                 <i class="fas fa-trash"></i>
@@ -210,27 +284,35 @@
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <div class="flex-1 w-full sm:w-auto">
                     <div class="flex items-center space-x-2 sm:space-x-3 mb-2">
+                        {% if device[20] %}<img src="{{ url_for('device_image', device_id=device[0]) }}" alt="" class="w-10 h-10 rounded object-cover border border-gray-700">{% endif %}
                         <h4 class="font-semibold text-gray-100 text-sm sm:text-base truncate">{{ device[1] }}</h4>
-                        <span class="px-2 py-0.5 sm:py-1 rounded-lg text-xs font-medium flex-shrink-0
-                            {% if device[4] == 'verfügbar' %}bg-green-600/20 text-green-400 border border-green-600/30{% else %}bg-red-600/20 text-red-400 border border-red-600/30{% endif %}">
+                        <span class="px-2 py-0.5 sm:py-1 rounded-lg text-xs font-medium flex-shrink-0 border border-gray-700/30
+                            {% if device[4] == 'verfügbar' %}bg-green-600/20 text-green-400
+                            {% elif device[4] == 'defekt' %}bg-red-600/20 text-red-400
+                            {% elif device[4] == 'zugewiesen' %}bg-purple-600/20 text-purple-300
+                            {% else %}bg-yellow-600/20 text-yellow-400{% endif %}">
                             {{ device[4] }}
                         </span>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 text-xs sm:text-sm text-gray-400">
+                        <label class="inline-flex items-center gap-2"><input type="checkbox" class="label-select accent-pink-500" value="{{ device[0] }}">Etikett</label>
                         <div class="truncate"><i class="fas fa-barcode mr-1 sm:mr-2 text-blue-400"></i>{{ device[2] }}</div>
-                        <div class="truncate"><i class="fas fa-map-marker-alt mr-1 sm:mr-2 text-green-400"></i>{{ device[3] }}</div>
+                        <div class="truncate"><i class="fas fa-map-marker-alt mr-1 sm:mr-2 text-green-400"></i>Platz: {{ device[3] }}</div>
+                        <div class="truncate"><i class="fas fa-door-open mr-1 sm:mr-2 text-orange-400"></i>Raum: {{ device[14] or '—' }}</div>
                         <div class="truncate"><i class="fas fa-cog mr-1 sm:mr-2 text-purple-400"></i>{{ device[7] or 'N/A' }}</div>
                         <div class="truncate"><i class="fas fa-tag mr-1 sm:mr-2 text-orange-400"></i>{{ device[8] or 'N/A' }}</div>
                         <div class="truncate"><i class="fas fa-hashtag mr-1 sm:mr-2 text-red-400"></i>{{ device[6] or 'N/A' }}</div>
-                        <div class="truncate"><i class="fas fa-warehouse mr-1 sm:mr-2 text-red-400"></i>{{ device[9] or 'N/A' }}</div>
+                        <div class="truncate"><i class="fas fa-euro-sign mr-1 sm:mr-2 text-yellow-400"></i>Kauf: {{ device[11] or 0 }} € · Miete: {{ device[15] or 0 }} €</div>
+                        <div class="truncate"><i class="fas fa-cubes mr-1 sm:mr-2 text-yellow-400"></i>Menge: {{ device[12] or 1 }}</div>
+                        {% if dmx_profiles.get(device[0]) %}<div class="sm:col-span-2 text-purple-300"><i class="fas fa-lightbulb mr-1 sm:mr-2"></i>DMX: {% for item in dmx_profiles.get(device[0]) %}<span class="inline-block mr-2">{{ item.channel }} = {{ item.function }}</span>{% endfor %}</div>{% endif %}
                     </div>
                 </div>
                 <div class="flex items-center space-x-2 sm:space-x-3 w-full sm:w-auto justify-end">
-                    <a href="/edit_device/{{ device[0] }}" 
+                    <a href="{{ base_path }}/edit_device/{{ device[0] }}" 
                        class="flex-1 sm:flex-none p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-600/20 active:bg-blue-600/30 rounded-lg transition-colors touch-manipulation text-center">
                         <i class="fas fa-edit"></i>
                     </a>
-                    <a href="/delete_device/{{ device[0] }}" 
+                    <a href="{{ base_path }}/delete_device/{{ device[0] }}" 
                        class="flex-1 sm:flex-none p-2 text-red-400 hover:text-red-300 hover:bg-red-600/20 active:bg-red-600/30 rounded-lg transition-colors touch-manipulation text-center"
                        onclick="return confirm('Gerät löschen?')">
                         <i class="fas fa-trash"></i>
@@ -241,8 +323,47 @@
         {% endfor %}
     {% endif %}
 </div>
+#}
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.group-label-toggle').forEach(function (toggle) {
+        toggle.addEventListener('change', function () {
+            const group = toggle.closest('details');
+            group.querySelectorAll('.label-select').forEach(function (checkbox) {
+                checkbox.checked = toggle.checked;
+            });
+        });
+    });
+
+    const link = document.getElementById('selected-label-export');
+    if (!link) return;
+    const baseHref = link.href;
+    link.addEventListener('click', function (event) {
+        const ids = Array.from(document.querySelectorAll('.label-select:checked')).map(input => input.value);
+        if (!ids.length) {
+            event.preventDefault();
+            alert('Bitte zuerst die Geräte markieren, für die Etiketten erstellt werden sollen.');
+            return;
+        }
+        const url = new URL(baseHref, window.location.origin);
+        ids.forEach(id => url.searchParams.append('device_ids', id));
+        link.href = url.toString();
+    });
+});
+</script>
 
 <style>
+    summary::-webkit-details-marker {
+        display: none;
+    }
+    .group-chevron i {
+        transition: transform 0.2s ease;
+    }
+    details[open] .group-chevron i {
+        transform: rotate(180deg);
+    }
+
     /* Mobile viewport optimization */
     @media (max-width: 640px) {
         body {

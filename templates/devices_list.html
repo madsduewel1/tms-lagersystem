@@ -11,10 +11,10 @@
         </p>
     </div>
     <div class="space-x-2">
-        <a href="/edit_device/{{ device[0] }}" class="text-blue-400 hover:text-blue-300">
+        <a href="{{ base_path }}/edit_device/{{ device[0] }}" class="text-blue-400 hover:text-blue-300">
             <i class="fas fa-edit"></i>
         </a>
-        <a href="/delete_device/{{ device[0] }}" class="text-red-400 hover:text-red-300" 
+        <a href="{{ base_path }}/delete_device/{{ device[0] }}" class="text-red-400 hover:text-red-300" 
            onclick="return confirm('Gerät löschen?')">
             <i class="fas fa-trash"></i>
         </a>

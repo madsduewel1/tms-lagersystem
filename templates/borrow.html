@@ -13,7 +13,7 @@
     {% if messages %}
     <div class="mb-4 sm:mb-6">
         {% for category, message in messages %}
-        <div class="p-3 sm:p-4 rounded-lg sm:rounded-xl {% if category == 'error' %}bg-red-900/50 border border-red-700 text-red-200{% else %}bg-green-900/50 border border-green-700 text-green-200{% endif %}">
+        <div class="p-3 sm:p-4 rounded-lg sm:rounded-xl {% if category == 'error' %}bg-red-900/50 border border-gray-700 text-red-200{% else %}bg-green-900/50 border border-gray-700 text-green-200{% endif %}">
             <i class="fas {% if category == 'error' %}fa-exclamation-triangle{% else %}fa-check-circle{% endif %} mr-2"></i>{{ message }}
         </div>
         {% endfor %}
@@ -37,7 +37,7 @@
                         <p class="text-xs sm:text-sm text-gray-400 mb-3">
                             Generiere alle fehlenden Auslei-Scheine neu. 
                         </p>
-                        <a href="/admin/regenerate_missing_slips" 
+                        <a href="{{ base_path }}/admin/regenerate_missing_slips" 
                            class="inline-flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg text-xs sm:text-sm font-medium transition-colors touch-manipulation">
                             <i class="fas fa-redo mr-2"></i>
                             Fehlende Scheine regenerieren
@@ -59,7 +59,7 @@
                         <p class="text-xs sm:text-sm text-gray-400 mb-3">
                             Lade alle Ausleihscheine als ZIP-Archiv herunter.
                         </p>
-                        <a href="/admin/download_all_slips" 
+                        <a href="{{ base_path }}/admin/download_all_slips" 
                            class="inline-flex items-center px-3 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 rounded-lg text-xs sm:text-sm font-medium transition-colors touch-manipulation">
                             <i class="fas fa-download mr-2"></i>
                             Alle Scheine herunterladen (ZIP)
@@ -75,8 +75,15 @@
         <div class="flex flex-col gap-3 sm:gap-4">
             <div class="flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <textarea name="barcode" placeholder="Barcode scannen oder eingeben."
-                          class="flex-1 p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-blue-500 focus:outline-none text-sm sm:text-base border border-gray-600 text-gray-100 resize-none"
+                          class="flex-1 p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-gray-700 focus:outline-none text-sm sm:text-base border border-gray-600 text-gray-100 resize-none"
                           rows="3" data-autofocus></textarea>
+                <div class="flex items-center justify-between sm:justify-start gap-2 bg-gray-700 rounded-lg sm:rounded-xl border border-gray-600 px-3 py-2">
+                    <label for="borrow_quantity" class="text-xs sm:text-sm text-gray-300 whitespace-nowrap">
+                        <i class="fas fa-cubes mr-1 text-yellow-400"></i>Menge
+                    </label>
+                    <input type="number" id="borrow_quantity" name="borrow_quantity" min="1" value="1"
+                           class="w-20 bg-gray-800 rounded-lg px-2 py-2 text-center text-sm sm:text-base text-gray-100 focus:outline-none border border-gray-600">
+                </div>
                 <button type="submit" name="add_device"
                         class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 active:bg-blue-800 px-6 py-3 rounded-lg sm:rounded-xl font-semibold transition-colors touch-manipulation text-sm sm:text-base">
                     <i class="fas fa-plus mr-2"></i>Hinzufügen
@@ -96,13 +103,24 @@
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 bg-gray-700 p-3 sm:p-4 rounded-lg border border-gray-600">
                 <div class="flex-1 min-w-0 w-full sm:w-auto">
                     <div class="font-medium text-gray-100 text-sm sm:text-base truncate">{{ device.name }}</div>
-                    <div class="text-xs sm:text-sm text-gray-400 truncate">({{ device.barcode }}) - Menge: {{ device.quantity }}{% if device.max_quantity > 1 %} / {{ device.max_quantity }}{% endif %}</div>
+                    <div class="text-xs sm:text-sm text-gray-400 truncate">({{ device.barcode }}){% if device.max_quantity > 1 %} · max. {{ device.max_quantity }}{% endif %}</div>
                 </div>
-                <a href="/remove_from_borrow/{{ device.id }}"
-                   class="w-full sm:w-auto text-center sm:text-left text-red-400 hover:text-red-300 active:text-red-200 transition-colors touch-manipulation p-2 sm:p-0">
-                    <i class="fas fa-times mr-2 sm:mr-0"></i>
-                    <span class="sm:hidden">Entfernen</span>
-                </a>
+                <div class="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
+                    <form method="POST" action="{{ url_for('update_borrow_quantity') }}" class="flex items-center gap-2">
+                        <input type="hidden" name="device_id" value="{{ device.id }}">
+                        <label class="text-xs text-gray-400 whitespace-nowrap">Menge</label>
+                        <input type="number" name="quantity" min="1" max="{{ device.max_quantity }}" value="{{ device.quantity }}"
+                               class="w-16 p-2 bg-gray-800 rounded-lg border border-gray-600 text-center text-sm text-gray-100 focus:outline-none">
+                        <button type="submit" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg text-xs font-medium text-white transition-colors touch-manipulation">
+                            OK
+                        </button>
+                    </form>
+                    <a href="{{ base_path }}/remove_from_borrow/{{ device.id }}"
+                       class="text-red-400 hover:text-red-300 active:text-red-200 transition-colors touch-manipulation p-2">
+                        <i class="fas fa-times mr-2 sm:mr-0"></i>
+                        <span class="sm:hidden">Entfernen</span>
+                    </a>
+                </div>
             </div>
             {% endfor %}
         </div>
@@ -115,7 +133,7 @@
                     <i class="fas fa-user mr-1 text-blue-400"></i>Name des Ausleihers *
                 </label>
                 <input type="text" name="borrower_name" placeholder="Name eingeben" required
-                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-blue-500 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
+                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-gray-700 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
             </div>
             
             <div>
@@ -123,7 +141,7 @@
                     <i class="fas fa-id-card mr-1 text-green-400"></i>Ausleiher ID (optional)
                 </label>
                 <input type="text" name="borrower_id" placeholder="ID eingeben"
-                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-blue-500 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
+                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-gray-700 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
             </div>
             
             <div>
@@ -131,7 +149,7 @@
                     <i class="fas fa-envelope mr-1 text-purple-400"></i>E-Mail (optional)
                 </label>
                 <input type="email" name="email" placeholder="E-Mail eingeben"
-                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-blue-500 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
+                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-gray-700 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
             </div>
             
             <div>
@@ -139,7 +157,7 @@
                     <i class="fas fa-graduation-cap mr-1 text-orange-400"></i>Klasse (optional)
                 </label>
                 <input type="text" name="klasse" placeholder="Klasse eingeben"
-                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-blue-500 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
+                       class="w-full p-2.5 sm:p-3 bg-gray-700 rounded-lg sm:rounded-xl focus:border-gray-700 focus:outline-none border border-gray-600 text-gray-100 text-sm sm:text-base">
             </div>
             {% endif %}
             
@@ -152,7 +170,7 @@
     {% endif %}
 
     <!-- Back Button -->
-    <a href="/lager/{{ session.current_lager }}"
+    <a href="{{ base_path }}/lager/{{ session.current_lager }}"
        class="block text-center text-gray-400 hover:text-white active:text-gray-300 transition-colors py-3 touch-manipulation text-sm sm:text-base">
         <i class="fas fa-arrow-left mr-2"></i>Zurück
     </a>

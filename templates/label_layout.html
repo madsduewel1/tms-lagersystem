@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html class="dark">
 <head>
+    <script>var BASE_PATH='{{ request.script_root or "/lagersystem" }}';</script>
+    <base href="{{ url_for('static', filename='') | replace('static/','') }}" onerror="this.href='.'">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Label Layout Editor</title>
@@ -98,8 +100,8 @@
             background: white;
         }
         .drop-zone.drag-over {
-            border-color: #3b82f6;
-            background-color: rgba(59, 130, 246, 0.1);
+            border-color: #666666;
+            background-color: rgba(255, 255, 255, 0.06);
         }
         .field-element {
             position: absolute;
@@ -111,17 +113,16 @@
             min-height: 20px;
         }
         .field-element:hover {
-            border-color: #3b82f6;
+            border-color: #666666;
         }
         .field-element.selected {
-            border-color: #10b981;
-            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+            border-color: #888888;
         }
         .resize-handle {
             position: absolute;
             width: 8px;
             height: 8px;
-            background: #10b981;
+            background: #888888;
             border: 1px solid #fff;
             cursor: se-resize;
             bottom: -4px;
@@ -140,7 +141,7 @@
             border: 1px solid #4b5563;
             background: white;
             color: black;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            
         }
     </style>
 </head>
@@ -219,15 +220,11 @@
                             </div>
                             <div class="draggable bg-blue-700 p-3 rounded cursor-pointer hover:bg-gray-600 transition flex items-center" 
                                  data-field-type="instrumentenart" draggable="true">
-                                <i class="fas fa-tools mr-3 text-pink-400"></i>Instrumentenart
+                                <i class="fas fa-tools mr-3 text-pink-400"></i>Kategorie
                             </div>
                             <div class="draggable bg-blue-700 p-3 rounded cursor-pointer hover:bg-gray-600 transition flex items-center" 
                                  data-field-type="seriennummer" draggable="true">
                                 <i class="fas fa-hashtag mr-3 text-teal-400"></i>Seriennummer
-                            </div>
-                            <div class="draggable bg-blue-700 p-3 rounded cursor-pointer hover:bg-gray-600 transition flex items-center" 
-                                 data-field-type="inventarnummer" draggable="true">
-                                <i class="fas fa-list-ol mr-3 text-orange-400"></i>Inventar-Nr
                             </div>
                             <div class="draggable bg-blue-700 p-3 rounded cursor-pointer hover:bg-gray-600 transition flex items-center" 
                                  data-field-type="location" draggable="true">
@@ -248,10 +245,6 @@
                             <div class="draggable bg-blue-700 p-3 rounded cursor-pointer hover:bg-gray-600 transition flex items-center" 
                                  data-field-type="borrower_name" draggable="true">
                                 <i class="fas fa-user mr-3 text-purple-300"></i>Ausgeliehen an
-                            </div>
-                            <div class="draggable bg-blue-700 p-3 rounded cursor-pointer hover:bg-gray-600 transition flex items-center" 
-                                 data-field-type="borrower_id" draggable="true">
-                                <i class="fas fa-id-card mr-3 text-indigo-300"></i>Ausleiher-ID
                             </div>
                             <div class="draggable bg-blue-700 p-3 rounded cursor-pointer hover:bg-gray-600 transition flex items-center" 
                                  data-field-type="class" draggable="true">
@@ -304,6 +297,11 @@
                                     <option value="center">Zentriert</option>
                                     <option value="right">Rechts</option>
                                 </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">Drehung (°)</label>
+                                <input type="number" id="fieldRotation" value="0" min="-180" max="180" step="1"
+                                       class="w-full p-2 bg-gray-700 rounded text-sm" onchange="updateSelectedField()">
                             </div>
                             <button onclick="deleteSelectedField()" class="w-full bg-red-600 hover:bg-red-700 p-2 rounded text-sm font-semibold transition">
                                 <i class="fas fa-trash mr-1"></i>Feld löschen
@@ -395,6 +393,8 @@
             field.style.height = '30px';
             field.style.fontSize = '12px';
             field.style.textAlign = 'left';
+            field.dataset.rotation = '0';
+            field.style.transform = 'rotate(0deg)';
 
             let content = '';
             switch(type) {
@@ -416,7 +416,7 @@
                     field.style.width = '80px';
                     break;
                 case 'instrumentenart':
-                    content = 'Instrumentenart';
+                    content = 'Kategorie';
                     field.style.width = '120px';
                     break;
                 case 'seriennummer':
@@ -544,6 +544,7 @@
             document.getElementById('fieldText').value = text;
             document.getElementById('fieldBold').checked = field.style.fontWeight === 'bold';
             document.getElementById('textAlign').value = textAlign;
+            document.getElementById('fieldRotation').value = field.dataset.rotation || '0';
         }
 
         function updateSelectedField() {
@@ -553,10 +554,13 @@
             const text = document.getElementById('fieldText').value;
             const bold = document.getElementById('fieldBold').checked;
             const textAlign = document.getElementById('textAlign').value;
+            const rotation = parseFloat(document.getElementById('fieldRotation').value) || 0;
 
             selectedField.style.fontSize = fontSize;
             selectedField.style.fontWeight = bold ? 'bold' : 'normal';
             selectedField.style.textAlign = textAlign;
+            selectedField.dataset.rotation = String(rotation);
+            selectedField.style.transform = `rotate(${rotation}deg)`;
             
             if (text && (selectedField.dataset.fieldType === 'text' || text !== selectedField.querySelector('div').textContent)) {
                 selectedField.querySelector('div').textContent = text;
@@ -649,6 +653,7 @@
                     fontSize: field.style.fontSize || '12px',
                     fontWeight: field.style.fontWeight || 'normal',
                     textAlign: field.style.textAlign || 'left',
+                    rotation: parseFloat(field.dataset.rotation || '0') || 0,
                     text: field.querySelector('div').textContent
                 });
             });
@@ -664,7 +669,7 @@
             };
 
             try {
-                const response = await fetch('/save-layout', {
+                const response = await fetch(`${BASE_PATH}/save-layout`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -712,6 +717,8 @@
                     field.style.fontSize = fieldData.fontSize;
                     field.style.fontWeight = fieldData.fontWeight;
                     field.style.textAlign = fieldData.textAlign;
+                    field.dataset.rotation = fieldData.rotation || '0';
+                    field.style.transform = `rotate(${field.dataset.rotation}deg)`;
 
                     field.innerHTML = `
                         <div class="p-1 text-xs text-center h-full flex items-center justify-center overflow-hidden">

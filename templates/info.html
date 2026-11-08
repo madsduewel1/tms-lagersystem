@@ -8,7 +8,7 @@
             <i class="fas fa-qrcode text-lg sm:text-xl text-blue-400"></i>
             <span>Geräte-Scanner</span>
         </h1>
-        <a href="/lager/{{ session.current_lager }}" 
+        <a href="{{ base_path }}/lager/{{ session.current_lager }}" 
            class="text-sm sm:text-base text-gray-400 hover:text-white transition flex items-center touch-manipulation">
             <i class="fas fa-arrow-left mr-2"></i>Zurück zum Lager
         </a>
@@ -17,7 +17,7 @@
     <!-- Scan Options -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
         <!-- Camera Scanner Card -->
-        <div class="bg-gradient-to-br from-green-900 to-green-800 p-4 sm:p-6 rounded-xl shadow-lg border border-green-700 hover:shadow-green-900/50 transition-all duration-300">
+        <div class="bg-gray-700 p-4 sm:p-6 rounded-xl border border-gray-700 /50 transition-all duration-300">
             <div class="flex items-center mb-3 sm:mb-4">
                 <div class="bg-green-600 p-2 sm:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
                     <i class="fas fa-camera text-xl sm:text-2xl text-white"></i>
@@ -28,13 +28,13 @@
                 </div>
             </div>
             <button id="startCameraBtn" 
-                    class="w-full bg-green-600 hover:bg-green-500 active:bg-green-400 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition-all duration-200 transform hover:scale-105 active:scale-95 shadow-lg touch-manipulation text-sm sm:text-base">
+                    class="w-full bg-green-600 hover:bg-green-500 active:bg-green-400 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition-all duration-200 transform hover:scale-105 active:scale-95 touch-manipulation text-sm sm:text-base">
                 <i class="fas fa-camera mr-2"></i>Kamera öffnen
             </button>
         </div>
 
         <!-- Manual Input Card -->
-        <div class="bg-gradient-to-br from-blue-900 to-blue-800 p-4 sm:p-6 rounded-xl shadow-lg border border-blue-700 hover:shadow-blue-900/50 transition-all duration-300">
+        <div class="bg-gray-700 p-4 sm:p-6 rounded-xl border border-gray-700 /50 transition-all duration-300">
             <div class="flex items-center mb-3 sm:mb-4">
                 <div class="bg-blue-600 p-2 sm:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
                     <i class="fas fa-keyboard text-xl sm:text-2xl text-white"></i>
@@ -49,12 +49,12 @@
                     <input type="text" 
                            id="qr_input" 
                            name="qr_code" 
-                           class="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-950 border-2 border-blue-600 rounded-lg text-white placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition text-base sm:text-lg"
+                           class="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-950 border-2 border-gray-700 rounded-lg text-white placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition text-base sm:text-lg"
                            placeholder="QR-Code eingeben..." 
                            autofocus>
                     <button type="submit" 
                             name="search_device" 
-                            class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition-all duration-200 transform hover:scale-105 active:scale-95 shadow-lg touch-manipulation text-sm sm:text-base">
+                            class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition-all duration-200 transform hover:scale-105 active:scale-95 touch-manipulation text-sm sm:text-base">
                         <i class="fas fa-search mr-2"></i>Gerät suchen
                     </button>
                 </div>
@@ -64,7 +64,7 @@
 
     {% if searched and not device_info %}
     <!-- Error Message -->
-    <div class="bg-red-900/50 border-2 border-red-600 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 animate-shake">
+    <div class="bg-red-900/50 border-2 border-gray-700 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 animate-shake">
         <div class="flex items-start sm:items-center gap-3 sm:gap-4">
             <i class="fas fa-exclamation-triangle text-2xl sm:text-3xl text-red-400 flex-shrink-0 mt-1 sm:mt-0"></i>
             <div class="min-w-0">
@@ -78,9 +78,9 @@
 
     {% if device_info %}
     <!-- Static Device Info Display -->
-    <div class="bg-gray-800 rounded-xl shadow-xl border border-gray-700 overflow-hidden">
+    <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
         <!-- Header -->
-        <div class="bg-gradient-to-r from-blue-600 to-blue-800 p-4 sm:p-6">
+        <div class="bg-gray-700 p-4 sm:p-6">
             <h2 class="text-xl sm:text-2xl font-bold text-white flex items-center gap-2 sm:gap-3">
                 <i class="fas fa-info-circle"></i>
                 <span>Geräte-Information</span>
@@ -111,6 +111,10 @@
                                 <span class="font-semibold text-white text-right">{{ device_info.lagerplatz }}</span>
                             </div>
                             <div class="flex justify-between gap-2">
+                                <span class="text-gray-400 flex-shrink-0">Menge:</span>
+                                <span class="font-semibold text-white text-right">{{ device_info.quantity or 1 }}</span>
+                            </div>
+                            <div class="flex justify-between gap-2">
                                 <span class="text-gray-400 flex-shrink-0">Seriennummer:</span>
                                 <span class="text-white text-right break-all">{{ device_info.seriennummer or 'Nicht angegeben' }}</span>
                             </div>
@@ -119,7 +123,7 @@
                                 <span class="text-white text-right break-words">{{ device_info.modell or 'Nicht angegeben' }}</span>
                             </div>
                             <div class="flex justify-between gap-2">
-                                <span class="text-gray-400 flex-shrink-0">Instrumentenart:</span>
+                                <span class="text-gray-400 flex-shrink-0">Kategorie:</span>
                                 <span class="text-white text-right break-words">{{ device_info.instrumentenart or 'Nicht angegeben' }}</span>
                             </div>
                         </div>
@@ -144,19 +148,25 @@
                         <h3 class="text-base sm:text-lg font-bold mb-3 sm:mb-4 flex items-center gap-2
                             {% if device_info.status == 'verfügbar' %}text-green-400
                             {% elif device_info.status == 'defekt' %}text-red-400
+                            {% elif device_info.status == 'zugewiesen' %}text-purple-300
                             {% else %}text-yellow-400{% endif %}">
                             <i class="fas fa-signal"></i>
                             <span>Status</span>
                         </h3>
                         <div class="text-center py-3 sm:py-4">
                             <div class="inline-flex items-center justify-center px-4 sm:px-6 py-2 sm:py-3 rounded-lg text-base sm:text-lg font-bold
-                                {% if device_info.status == 'verfügbar' %}bg-green-600/20 text-green-400 border-2 border-green-500
-                                {% elif device_info.status == 'defekt' %}bg-red-600/20 text-red-400 border-2 border-red-500
+                                {% if device_info.status == 'verfügbar' %}bg-green-600/20 text-green-400 border-2 border-gray-700
+                                {% elif device_info.status == 'defekt' %}bg-red-600/20 text-red-400 border-2 border-gray-700
+                                {% elif device_info.status == 'zugewiesen' %}bg-purple-600/20 text-purple-300 border-2 border-purple-500
                                 {% else %}bg-yellow-600/20 text-yellow-400 border-2 border-yellow-500{% endif %}">
                                 {% if device_info.status == 'verfügbar' %}
                                     <i class="fas fa-check-circle mr-2"></i>Verfügbar
                                 {% elif device_info.status == 'defekt' %}
                                     <i class="fas fa-exclamation-triangle mr-2"></i>Defekt
+                                {% elif device_info.status == 'zugewiesen' %}
+                                    <i class="fas fa-calendar-check mr-2"></i>Zugewiesen
+                                {% elif device_info.status == 'ausgeliehen' %}
+                                    <i class="fas fa-hand-holding mr-2"></i>Ausgeliehen
                                 {% else %}
                                     <i class="fas fa-user mr-2"></i>{{ device_info.status }}
                                 {% endif %}
@@ -234,12 +244,12 @@
 
             <!-- Action Buttons -->
             <div class="mt-4 sm:mt-6 flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <a href="/edit_device/{{ device_info.id }}" 
+                <a href="{{ base_path }}/edit_device/{{ device_info.id }}" 
                    class="flex-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition text-center touch-manipulation text-sm sm:text-base">
                     <i class="fas fa-edit mr-2"></i>Bearbeiten
                 </a>
                 {% if device_info.status == 'verfügbar' %}
-                <a href="/borrow" 
+                <a href="{{ base_path }}/borrow" 
                    class="flex-1 bg-green-600 hover:bg-green-500 active:bg-green-400 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition text-center touch-manipulation text-sm sm:text-base">
                     <i class="fas fa-hand-holding mr-2"></i>Ausleihen
                 </a>
@@ -259,7 +269,7 @@
             <span>QR-Code Scanner</span>
         </h3>
         <button id="closeScanner" 
-                class="text-white hover:text-red-400 transition-all duration-200 bg-red-600 hover:bg-red-700 active:bg-red-800 w-9 h-9 sm:w-10 sm:h-10 rounded-lg shadow-lg flex items-center justify-center touch-manipulation">
+                class="text-white hover:text-red-400 transition-all duration-200 bg-red-600 hover:bg-red-700 active:bg-red-800 w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center touch-manipulation">
             <i class="fas fa-times text-lg sm:text-xl"></i>
         </button>
     </div>
@@ -267,7 +277,7 @@
     <!-- Scanner Container -->
     <div class="flex-1 flex items-center justify-center p-2 sm:p-4 overflow-auto">
         <div class="w-full max-w-md">
-            <div class="bg-gray-900 rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700">
+            <div class="bg-gray-900 rounded-xl overflow-hidden border-2 border-gray-700">
                 <div id="qr-reader" class="w-full bg-black"></div>
                 <div class="p-3 sm:p-4 bg-gray-800">
                     <div id="scanStatus" class="text-center">
@@ -295,23 +305,17 @@
     <div class="min-h-screen flex items-start sm:items-center justify-center p-2 sm:p-4">
         <div class="relative w-full max-w-4xl my-4 sm:my-8">
             <button id="closeDeviceInfo" 
-                    class="sticky top-2 float-right mb-2 sm:absolute sm:-top-12 sm:right-0 text-white text-xs sm:text-sm lg:text-lg hover:text-red-400 transition-all duration-200 bg-gray-800 hover:bg-red-600 active:bg-red-700 px-3 py-2 sm:px-4 rounded-lg z-10 shadow-lg touch-manipulation">
+                    class="sticky top-2 float-right mb-2 sm:absolute sm:-top-12 sm:right-0 text-white text-xs sm:text-sm lg:text-lg hover:text-red-400 transition-all duration-200 bg-gray-800 hover:bg-red-600 active:bg-red-700 px-3 py-2 sm:px-4 rounded-lg z-10 touch-manipulation">
                 <i class="fas fa-times mr-1 sm:mr-2"></i>Schließen
             </button>
-            <div id="deviceInfoContent" class="bg-gray-900 rounded-lg sm:rounded-2xl shadow-2xl border-2 border-gray-700 overflow-hidden"></div>
+            <div id="deviceInfoContent" class="bg-gray-900 rounded-lg sm:rounded-2xl border-2 border-gray-700 overflow-hidden"></div>
         </div>
     </div>
 </div>
 
 <style>
-@keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-10px); }
-    75% { transform: translateX(10px); }
-}
-
 .animate-shake {
-    animation: shake 0.5s ease-in-out;
+    animation: none;
 }
 
 #qr-reader {
@@ -586,7 +590,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 deviceInfoContent.innerHTML = deviceInfoSection.innerHTML;
             } else {
                 deviceInfoContent.innerHTML = `
-                    <div class="p-8 sm:p-12 text-center bg-red-900/30 border-2 border-red-600 rounded-2xl m-4">
+                    <div class="p-8 sm:p-12 text-center bg-red-900/30 border-2 border-gray-700 rounded-2xl m-4">
                         <i class="fas fa-exclamation-triangle text-4xl sm:text-6xl text-red-400 mb-4"></i>
                         <h3 class="text-xl sm:text-2xl font-bold text-white mb-2">Gerät nicht gefunden</h3>
                         <p class="text-red-200 mb-1 text-sm sm:text-base">Kein Gerät mit dem Code gefunden:</p>
@@ -600,7 +604,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Error fetching device info:', error);
             deviceInfoContent.innerHTML = `
-                <div class="p-8 sm:p-12 text-center bg-red-900/30 border-2 border-red-600 rounded-2xl m-4">
+                <div class="p-8 sm:p-12 text-center bg-red-900/30 border-2 border-gray-700 rounded-2xl m-4">
                     <i class="fas fa-exclamation-circle text-4xl sm:text-6xl text-red-400 mb-4"></i>
                     <h3 class="text-xl sm:text-2xl font-bold text-white mb-2">Fehler beim Laden</h3>
                     <p class="text-red-200 mb-4 text-sm sm:text-base">Die Geräte-Information konnte nicht geladen werden.</p>

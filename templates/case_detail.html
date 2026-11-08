@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="w-full">
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl font-semibold">
+                <i class="fas fa-toolbox mr-2 text-pink-400"></i>{{ case[1] }}
+            </h1>
+            <p class="text-sm text-gray-500 mt-1">
+                Barcode: <span class="font-mono">{{ case[2] }}</span>
+                {% if case[7] %} · Typ: {{ case[7] }}{% endif %}
+                {% if case[5] %} · Lagerort: {{ case[5] }}{% endif %}
+                {% if case[4] %} · Lagerplatz: {{ case[4] }}{% endif %}
+            </p>
+            <span class="inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-full text-xs font-medium
+                {% if case[6] == 'verfügbar' %}bg-emerald-500/10 text-emerald-400
+                {% elif case[6] == 'defekt' %}bg-red-500/10 text-red-400
+                {% elif case[6] == 'zugewiesen' %}bg-purple-500/10 text-purple-300
+                {% else %}bg-yellow-500/10 text-yellow-400{% endif %}">
+                {% if case[6] == 'verfügbar' %}<i class="fas fa-check-circle"></i>
+                {% elif case[6] == 'defekt' %}<i class="fas fa-exclamation-triangle"></i>
+                {% elif case[6] == 'zugewiesen' %}<i class="fas fa-calendar-check"></i>
+                {% else %}<i class="fas fa-hand-holding"></i>{% endif %}
+                {{ case[6] or 'verfügbar' }}
+            </span>
+            {% if case[3] %}
+            <p class="text-sm text-gray-400 mt-2">{{ case[3] }}</p>
+            {% endif %}
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="{{ base_path }}/cases" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                <i class="fas fa-arrow-left mr-2"></i>Alle Cases
+            </a>
+            <form method="POST" action="{{ url_for('delete_case', case_id=case[0]) }}"
+                  onsubmit="return confirm('Case wirklich löschen? Die Geräte bleiben erhalten.')">
+                <button type="submit" class="px-4 py-2 bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-700 rounded-lg text-sm text-gray-300">
+                    <i class="fas fa-trash mr-2"></i>Löschen
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-4 gap-6">
+        <!-- Case bearbeiten -->
+        <div class="xl:col-span-1">
+            <form method="POST" action="{{ url_for('edit_case', case_id=case[0]) }}" class="bg-gray-900 border border-gray-800 p-5 rounded-xl">
+                <h2 class="text-sm font-medium mb-4">Case bearbeiten</h2>
+
+                <label class="block text-xs text-gray-400 mb-2" for="edit_name">Name</label>
+                <input type="text" id="edit_name" name="name" value="{{ case[1] }}"
+                       class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3" required>
+
+                <label class="block text-xs text-gray-400 mb-2" for="edit_lagerplatz">Lagerplatz</label>
+                <input type="text" id="edit_lagerplatz" name="lagerplatz" value="{{ case[4] or '' }}"
+                       class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+
+                <label class="block text-xs text-gray-400 mb-2" for="edit_lagerort">Lagerort / Raum</label>
+                <input type="text" id="edit_lagerort" name="lagerort" value="{{ case[5] or '' }}"
+                       class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+
+                <label class="block text-xs text-gray-400 mb-2" for="edit_case_type">Typ</label>
+                <select id="edit_case_type" name="case_type"
+                        class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+                    {% for type in case_types %}
+                    <option value="{{ type }}" {% if case[7] == type %}selected{% endif %}>{{ type }}</option>
+                    {% endfor %}
+                </select>
+
+                <label class="block text-xs text-gray-400 mb-2" for="edit_status">Status</label>
+                <select id="edit_status" name="status"
+                        class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-3">
+                    <option value="verfügbar" {% if case[6] == 'verfügbar' %}selected{% endif %}>Verfügbar</option>
+                    <option value="defekt" {% if case[6] == 'defekt' %}selected{% endif %}>Defekt</option>
+                    <option value="ausgeliehen" {% if case[6] == 'ausgeliehen' %}selected{% endif %}>Ausgeliehen</option>
+                    <option value="zugewiesen" {% if case[6] == 'zugewiesen' %}selected{% endif %}>Zugewiesen</option>
+                </select>
+
+                <label class="block text-xs text-gray-400 mb-2" for="edit_beschreibung">Beschreibung</label>
+                <textarea id="edit_beschreibung" name="beschreibung" rows="3"
+                          class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none mb-4">{{ case[3] or '' }}</textarea>
+
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 p-2.5 rounded-lg text-sm font-medium transition">
+                    <i class="fas fa-save mr-2"></i>Speichern
+                </button>
+            </form>
+        </div>
+
+        <!-- Geräte zuweisen -->
+        <div class="xl:col-span-3">
+            <form method="POST" action="{{ url_for('assign_case_devices', case_id=case[0]) }}">
+                <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                    <div class="px-4 py-3 border-b border-gray-800 flex flex-wrap items-center justify-between gap-3">
+                        <div class="text-sm font-medium">Geräte im Case</div>
+                        <input type="text" id="device-filter" placeholder="Geräte filtern…"
+                               class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-pink-500 focus:outline-none">
+                    </div>
+
+                    {% if devices %}
+                    <div class="max-h-[65vh] overflow-y-auto divide-y divide-gray-800">
+                        {% for device in devices %}
+                        {% set assigned_case = device[5] %}
+                        {% set is_this_case = assigned_case == case[0] %}
+                        {% set is_other_case = assigned_case is not none and not is_this_case %}
+                        <label class="device-row flex items-center gap-3 px-4 py-3 {% if is_other_case %}opacity-60{% else %}hover:bg-gray-800/50{% endif %}"
+                               data-name="{{ (device[1] ~ ' ' ~ device[2] ~ ' ' ~ (device[3] or ''))|lower }}">
+                            <input type="checkbox" name="device_ids" value="{{ device[0] }}"
+                                   class="w-4 h-4 accent-pink-500"
+                                   {% if is_this_case %}checked{% endif %}
+                                   {% if is_other_case %}disabled{% endif %}>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="font-medium text-sm">{{ device[1] }}</span>
+                                    <span class="text-xs font-mono text-gray-500">{{ device[2] }}</span>
+                                    {% if device[3] %}
+                                    <span class="text-xs text-gray-500">· {{ device[3] }}</span>
+                                    {% endif %}
+                                </div>
+                                {% if is_other_case %}
+                                <p class="text-xs text-yellow-500/80 mt-1">
+                                    <i class="fas fa-lock mr-1"></i>Bereits in Case „{{ device[6] }}"
+                                </p>
+                                {% endif %}
+                            </div>
+                            <span class="text-xs px-2 py-1 rounded-full bg-gray-800 text-gray-300 whitespace-nowrap">
+                                Menge: {{ device[7] or 1 }}
+                            </span>
+                            <span class="text-xs px-2 py-1 rounded-full
+                                {% if device[4] == 'verfügbar' %}bg-emerald-500/10 text-emerald-400
+                                {% elif device[4] == 'defekt' %}bg-red-500/10 text-red-400
+                                {% elif device[4] == 'zugewiesen' %}bg-purple-500/10 text-purple-300
+                                {% else %}bg-yellow-500/10 text-yellow-400{% endif %}">
+                                {{ device[4] }}
+                            </span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <div class="px-4 py-3 border-t border-gray-800 flex items-center justify-between gap-3">
+                        <p class="text-xs text-gray-500">
+                            Geräte, die bereits in einem anderen Case sind, müssen zuerst dort entfernt werden.
+                        </p>
+                        <button type="submit" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg text-sm font-medium transition whitespace-nowrap">
+                            <i class="fas fa-check mr-2"></i>Zuweisung speichern
+                        </button>
+                    </div>
+                    {% else %}
+                    <div class="p-8 text-center text-gray-500">
+                        Noch keine Geräte im Lager vorhanden.
+                    </div>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const filter = document.getElementById('device-filter');
+    if (!filter) return;
+    filter.addEventListener('input', function () {
+        const term = filter.value.toLowerCase().trim();
+        document.querySelectorAll('.device-row').forEach(function (row) {
+            const match = !term || (row.dataset.name || '').includes(term);
+            row.style.display = match ? '' : 'none';
+        });
+    });
+});
+</script>
+{% endblock %}

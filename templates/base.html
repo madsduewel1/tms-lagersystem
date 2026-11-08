@@ -1,9 +1,12 @@
 <!DOCTYPE html>
 <html class="dark">
 <head>
+    <script>var BASE_PATH='{{ base_path }}';</script>
+    <base href="{{ base_path }}/">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>{{ title }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -95,118 +98,46 @@
             background: rgba(255,255,255,0.15);
         }
 
-        /* Ambient Background */
-        .ambient-bg {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 0;
-            overflow: hidden;
-        }
-
-        .ambient-orb {
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(120px);
-            opacity: 0.2;
-            animation: float 20s ease-in-out infinite;
-        }
-
-        .orb-gold {
-            width: 400px;
-            height: 400px;
-            background: #d4a853;
-            top: -200px;
-            right: -100px;
-        }
-
-        .orb-blue {
-            width: 300px;
-            height: 300px;
-            background: #3b82f6;
-            bottom: -150px;
-            left: -100px;
-            animation-delay: -7s;
-        }
-
-        @keyframes float {
-            0%, 100% { transform: translate(0, 0) scale(1); }
-            33% { transform: translate(30px, -30px) scale(1.05); }
-            66% { transform: translate(-20px, 20px) scale(0.95); }
-        }
-
-        /* Glass Effect */
+        /* Neutral, flat UI without decorative effects */
         .glass-nav {
-            backdrop-filter: blur(20px);
-            background: rgba(17, 17, 17, 0.85);
+            background: #111111;
         }
 
-        /* Animations */
         .animate-fade-in {
-            animation: fadeIn 0.3s ease-in-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes modal-in {
-            from { opacity: 0; transform: translateY(-20px) scale(0.95); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
+            animation: none;
         }
 
         .modal-animate {
-            animation: modal-in 0.3s ease;
-        }
-
-        /* Badge Pulse */
-        @keyframes pulse-badge {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
+            animation: none;
         }
 
         .badge-pulse {
-            animation: pulse-badge 2s ease-in-out infinite;
+            animation: none;
         }
 
-        /* Group Header Style */
         .group-header-premium {
-            background: linear-gradient(135deg, rgba(212,168,83,0.1), rgba(212,168,83,0.02));
-            border-left: 3px solid #d4a853;
+            background: #1a1a1a;
+            border-left: 3px solid #555555;
         }
 
-        /* Device Card Active Glow */
         .device-active {
-            background: linear-gradient(145deg, #1f1a14 0%, #161310 100%);
-            border-color: #d4a853;
-            box-shadow: 0 0 0 1px rgba(212,168,83,0.1), 0 8px 32px -8px rgba(212,168,83,0.4);
+            background: #1f1f1f;
+            border-color: #666666;
         }
 
-        /* Input Focus Gold */
         .input-gold:focus {
-            border-color: #d4a853;
-            box-shadow: 0 0 0 3px rgba(212,168,83,0.15);
+            border-color: #666666;
             outline: none;
         }
 
-        /* Button Active Scale */
         .btn-scale:active {
-            transform: scale(0.98);
+            transform: none;
         }
 
-        /* Status Dot Glow */
-        .status-glow-green {
-            box-shadow: 0 0 8px #22c55e;
-        }
-        .status-glow-orange {
-            box-shadow: 0 0 8px #f5a623;
-        }
+        .status-glow-green,
+        .status-glow-orange,
         .status-glow-red {
-            box-shadow: 0 0 8px #ef4444;
+            box-shadow: none;
         }
     </style>
 </head>
@@ -217,24 +148,28 @@
     data-latest-version="{{ latest_version }}"
     {% endif %}
 >
-    <!-- Ambient Background -->
-    <div class="ambient-bg">
-        <div class="ambient-orb orb-gold"></div>
-        <div class="ambient-orb orb-blue"></div>
-    </div>
-
     <!-- Navigation -->
     <nav class="glass-nav border-b border-white/5 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="w-full px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16">
-                <div class="flex items-center gap-4">
+                <div class="flex items-center gap-6">
                     <!-- Logo -->
-                    <div class="flex items-center gap-2.5">
-                        <div class="w-9 h-9 bg-gold-200 rounded-xl flex items-center justify-center">
-                            <i class="fas fa-warehouse text-gold-500 text-sm"></i>
+                    <a href="{{ base_path }}/dashboard" class="flex items-center gap-2.5">
+                        <div class="w-9 h-9 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-warehouse text-amber-400 text-sm"></i>
                         </div>
-                        <span class="text-lg font-semibold text-white tracking-tight">CKS-DMS</span>
+                        <span class="text-lg font-semibold text-white tracking-tight">TMS-DMS</span>
+                    </a>
+                    {% if session.user_id %}
+                    <div class="hidden md:flex items-center gap-5 text-sm">
+                        <a href="{{ base_path }}/dashboard" class="text-gray-400 hover:text-white">Dashboard</a>
+                        <a href="{{ base_path }}/events" class="text-gray-400 hover:text-white">Events</a>
+                        {% if session.role == 'admin' %}
+                        <a href="{{ base_path }}/manage_lager" class="text-gray-400 hover:text-white">Lager</a>
+                        <a href="{{ base_path }}/verwaltung" class="text-gray-400 hover:text-white">Verwaltung</a>
+                        {% endif %}
                     </div>
+                    {% endif %}
                     <!-- Breadcrumb -->
                     {% if session.user_name %}
                     <div class="hidden md:flex items-center gap-2 text-sm text-gray-600">
@@ -242,7 +177,7 @@
                         <span class="text-gray-500">{{ session.user_name }}</span>
                         {% if session.current_lager %}
                         <span>/</span>
-                        <span class="text-gold-500">Lager {{ session.current_lager }}</span>
+                        <span class="text-gray-400">Lager {{ session.current_lager }}</span>
                         {% endif %}
                     </div>
                     {% endif %}
@@ -258,14 +193,19 @@
                     
                     <!-- User Info -->
                     <div class="flex items-center gap-2.5">
-                        <div class="w-9 h-9 bg-gradient-to-br from-gold-200 to-gold-50 border border-white/5 rounded-xl flex items-center justify-center">
-                            <i class="fas fa-user text-gold-500 text-xs"></i>
+                        <div class="w-9 h-9 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-user text-blue-400 text-xs"></i>
                         </div>
                         <span class="text-sm font-medium text-gray-500 hidden sm:block">{{ session.user_name }}</span>
                     </div>
                     
+                    <!-- Passwort ändern -->
+                    <a href="{{ base_path }}/passwort" class="text-gray-600 hover:text-amber-400 transition-colors text-sm" title="Passwort ändern">
+                        <i class="fas fa-key"></i>
+                    </a>
+
                     <!-- Logout -->
-                    <a href="/logoutdms" class="text-gray-600 hover:text-red-500 transition-colors text-sm">
+                    <a href="{{ base_path }}/logoutdms" class="text-gray-600 hover:text-red-500 transition-colors text-sm">
                         <i class="fas fa-sign-out-alt"></i>
                     </a>
                     {% endif %}
@@ -276,7 +216,7 @@
 
     <!-- Notification Modal -->
     <div id="notificationModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start justify-center pt-20 px-4">
-        <div class="bg-gray-925 border border-white/5 rounded-3xl max-w-lg w-full max-h-[70vh] overflow-hidden shadow-2xl modal-animate">
+        <div class="bg-gray-925 border border-white/5 rounded-3xl max-w-lg w-full max-h-[70vh] overflow-hidden modal-animate">
             <div class="p-5 border-b border-white/5 flex items-center justify-between">
                 <h3 class="text-base font-semibold flex items-center gap-2.5">
                     <i class="fas fa-bell text-gold-500"></i>
@@ -301,7 +241,16 @@
     </div>
 
     <!-- Main Content -->
-    <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="relative z-10 w-full px-4 sm:px-6 lg:px-8 py-8">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="mb-6 space-y-2">
+            {% for message in messages %}
+            <div class="px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-200">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
         {% block content %}{% endblock %}
     </div>
 
@@ -313,7 +262,7 @@
                 search: document.getElementById('search-input')?.value || '',
                 status: document.getElementById('status-select')?.value || '',
                 art: document.getElementById('art-select')?.value || '',
-                klasse: document.getElementById('klasse-select')?.value || '',
+                lagerort: document.getElementById('klasse-select')?.value || '',
                 sort_by: document.getElementById('sort-select')?.value || 'name',
                 group_by: document.getElementById('group-select')?.value || 'none',
                 path: window.location.pathname,
@@ -331,13 +280,14 @@
             url.searchParams.delete('status');
             url.searchParams.delete('art');
             url.searchParams.delete('klasse');
+            url.searchParams.delete('lagerort');
             url.searchParams.delete('sort_by');
             url.searchParams.delete('group_by');
             
             if (filters.search) url.searchParams.set('search', filters.search);
             if (filters.status) url.searchParams.set('status', filters.status);
             if (filters.art) url.searchParams.set('art', filters.art);
-            if (filters.klasse) url.searchParams.set('klasse', filters.klasse);
+            if (filters.lagerort || filters.klasse) url.searchParams.set('lagerort', filters.lagerort || filters.klasse);
             if (filters.sort_by && filters.sort_by !== 'name') url.searchParams.set('sort_by', filters.sort_by);
             if (filters.group_by && filters.group_by !== 'none') url.searchParams.set('group_by', filters.group_by);
             
@@ -354,13 +304,13 @@
                     if (document.getElementById('search-input')) document.getElementById('search-input').value = filters.search;
                     if (document.getElementById('status-select')) document.getElementById('status-select').value = filters.status;
                     if (document.getElementById('art-select')) document.getElementById('art-select').value = filters.art;
-                    if (document.getElementById('klasse-select')) document.getElementById('klasse-select').value = filters.klasse;
+                    if (document.getElementById('klasse-select')) document.getElementById('klasse-select').value = filters.lagerort || filters.klasse;
                     if (document.getElementById('sort-select')) document.getElementById('sort-select').value = filters.sort_by;
                     if (document.getElementById('group-select')) document.getElementById('group-select').value = filters.group_by;
                     
                     const urlParams = new URLSearchParams(window.location.search);
                     if (!urlParams.has('search') && !urlParams.has('status') && 
-                        (filters.search || filters.status || filters.art || filters.klasse)) {
+                        (filters.search || filters.status || filters.art || filters.lagerort || filters.klasse)) {
                         setTimeout(liveSearch, 100);
                     }
                 }
@@ -373,7 +323,7 @@
             if (document.getElementById('search-input')) document.getElementById('search-input').value = urlParams.get('search') || '';
             if (document.getElementById('status-select')) document.getElementById('status-select').value = urlParams.get('status') || '';
             if (document.getElementById('art-select')) document.getElementById('art-select').value = urlParams.get('art') || '';
-            if (document.getElementById('klasse-select')) document.getElementById('klasse-select').value = urlParams.get('klasse') || '';
+            if (document.getElementById('klasse-select')) document.getElementById('klasse-select').value = urlParams.get('lagerort') || urlParams.get('klasse') || '';
             if (document.getElementById('sort-select')) document.getElementById('sort-select').value = urlParams.get('sort_by') || 'name';
             if (document.getElementById('group-select')) document.getElementById('group-select').value = urlParams.get('group_by') || 'none';
         }
@@ -440,13 +390,6 @@
             }
         }
 
-        function simulateQRScan() {
-            const qrCode = prompt('QR Code eingeben:');
-            if (qrCode) {
-                window.location.href = `/return?qr=${qrCode}`;
-            }
-        }
-
         async function liveSearch() {
             const searchInput = document.getElementById('search-input');
             const statusSelect = document.getElementById('status-select');
@@ -461,7 +404,7 @@
             const search = searchInput.value;
             const status = statusSelect?.value ? [statusSelect.value] : [];
             const art = artSelect?.value ? [artSelect.value] : [];
-            const klasse = klasseSelect?.value ? [klasseSelect.value] : [];
+            const lagerorte = klasseSelect?.value ? [klasseSelect.value] : [];
             const sort_by = sortSelect?.value || 'name';
             const group_by = groupSelect?.value || 'none';
 
@@ -472,7 +415,7 @@
             if (search) params.append('search', search);
             status.forEach(s => params.append('status', s));
             art.forEach(a => params.append('art', a));
-            klasse.forEach(k => params.append('klasse', k));
+            lagerorte.forEach(k => params.append('lagerort', k));
             if (sort_by) params.append('sort_by', sort_by);
             if (group_by) params.append('group_by', group_by);
 
@@ -682,7 +625,7 @@
                     
                     return `
                         <div class="p-4 rounded-2xl border transition-all ${isUnread 
-                            ? 'bg-blue-100 border-blue-200/30' 
+                            ? 'bg-blue-100 border-gray-700/30' 
                             : 'bg-gray-900 border-white/5'}" 
                             onclick="markAsRead('${notification.id}')">
                             <div class="flex gap-3.5">
@@ -695,14 +638,14 @@
                                     <p class="text-[13px] leading-relaxed mb-1.5 ${isUnread ? 'text-white' : 'text-gray-500'}">${notification.message}</p>
                                     <span class="text-[11px] text-gray-600">${notification.timestamp}</span>
                                     ${isUpdate ? `
-                                        <a href="/update" 
-                                           class="inline-flex items-center gap-2 mt-3 px-4 py-2.5 bg-gradient-to-r from-gold-500 to-gold-400 rounded-xl text-gray-950 text-[13px] font-semibold hover:brightness-110 transition-all btn-scale">
+                                        <a href="{{ base_path }}/update" 
+                                           class="inline-flex items-center gap-2 mt-3 px-4 py-2.5 bg-gray-700 rounded-xl text-gray-100 text-[13px] font-semibold hover:bg-gray-600 transition-all">
                                             <i class="fas fa-download text-xs"></i>
                                             Update herunterladen
                                         </a>
                                     ` : ''}
                                 </div>
-                                ${isUnread ? '<div class="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1 status-glow-green" style="box-shadow: 0 0 8px #3b82f6"></div>' : ''}
+                                ${isUnread ? '<div class="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1"></div>' : ''}
                             </div>
                         </div>
                     `;
