@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="w-full">
+    <a href="{{ url_for('verwaltung') }}" class="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-4">
+        <i class="fas fa-arrow-left"></i>Verwaltung
+    </a>
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl font-semibold flex items-center gap-3">
+                <i class="fas fa-calendar-plus text-pink-400"></i>
+                <span>Event-Anfragen</span>
+            </h1>
+            <p class="text-sm text-gray-500 mt-1">Öffentliches Anfrageformular aktivieren und den Link teilen.</p>
+        </div>
+        <span class="px-3 py-1.5 rounded-full text-xs font-medium border
+            {% if enabled %}bg-emerald-600/20 border-emerald-500/30 text-emerald-300
+            {% else %}bg-gray-800 border-gray-700 text-gray-400{% endif %}">
+            {% if enabled %}Aktiv{% else %}Deaktiviert{% endif %}
+        </span>
+    </div>
+
+    <section class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6 mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <h2 class="font-semibold">Öffentliches Anfrageformular</h2>
+                <p class="text-sm text-gray-400 mt-1">Der Link funktioniert ohne Login und kann extern geteilt werden.</p>
+                <code class="inline-block mt-3 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300">{{ base_path }}/events/request</code>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="copyRequestLink"
+                        class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                    <i class="fas fa-copy mr-2"></i>Link kopieren
+                </button>
+                <form method="POST">
+                    <input type="hidden" name="enabled" value="{{ '0' if enabled else '1' }}">
+                    <button type="submit"
+                            class="px-4 py-2.5 rounded-lg text-sm font-medium
+                                {% if enabled %}bg-red-700 hover:bg-red-600{% else %}bg-emerald-600 hover:bg-emerald-700{% endif %}">
+                        <i class="fas fa-{{ 'toggle-off' if enabled else 'toggle-on' }} mr-2"></i>
+                        {{ 'Anfragen deaktivieren' if enabled else 'Anfragen aktivieren' }}
+                    </button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-inbox text-pink-400 mt-1"></i>
+                <div>
+                    <h2 class="font-semibold">Eingehende Anfragen</h2>
+                    <p class="text-sm text-gray-400 mt-1">Anfragen werden auf dem Dashboard angezeigt und können dort in ein Event umgewandelt werden.</p>
+                </div>
+            </div>
+            <a href="{{ url_for('dashboard') }}"
+               class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                <i class="fas fa-gauge-high mr-2"></i>Zum Dashboard
+                {% if request_count %}<span class="ml-2 px-2 py-0.5 rounded-full bg-pink-600/20 text-pink-300 text-xs">{{ request_count }}</span>{% endif %}
+            </a>
+        </div>
+    </section>
+</div>
+
+<script>
+document.getElementById('copyRequestLink')?.addEventListener('click', async function () {
+    const url = window.location.origin + '{{ base_path }}' + '/events/request';
+    try {
+        await navigator.clipboard.writeText(url);
+        this.innerHTML = '<i class="fas fa-check mr-2"></i>Link kopiert';
+        setTimeout(() => { this.innerHTML = '<i class="fas fa-copy mr-2"></i>Link kopieren'; }, 2000);
+    } catch (e) {
+        window.prompt('Link kopieren:', url);
+    }
+});
+</script>
+{% endblock %}

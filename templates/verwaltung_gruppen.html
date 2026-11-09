@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="w-full">
+    <a href="{{ url_for('verwaltung') }}" class="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-4">
+        <i class="fas fa-arrow-left"></i>Verwaltung
+    </a>
+    <h1 class="text-2xl font-semibold mb-6">
+        <i class="fas fa-people-group mr-2"></i>Benutzergruppen / AGs
+    </h1>
+
+    <section class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6 mt-6">
+        <div class="flex items-start gap-3 mb-4">
+            <i class="fas fa-people-group text-purple-400 mt-1"></i>
+            <div>
+                <h2 class="font-semibold">Benutzergruppen / AGs</h2>
+                <p class="text-sm text-gray-400 mt-1">Gruppen können bei Events als Ganzes freigegeben werden. So erhalten alle Mitglieder gleichzeitig Zugriff.</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+            <form method="POST" action="{{ url_for('create_user_group') }}" class="border border-gray-800 rounded-lg p-4">
+                <h3 class="text-sm font-medium mb-3">Neue Gruppe</h3>
+                <label class="block text-xs text-gray-400 mb-2" for="group_name">Gruppenname</label>
+                <input type="text" id="group_name" name="name" placeholder="z. B. AG Technik"
+                       class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:outline-none mb-3" required>
+                <label class="block text-xs text-gray-400 mb-2">Mitglieder</label>
+                <div class="max-h-52 overflow-y-auto space-y-1 mb-3 border border-gray-800 rounded-lg p-2">
+                    {% for user in users %}
+                    <label class="flex items-center gap-2 text-sm text-gray-300 px-1 py-0.5">
+                        <input type="checkbox" name="member_ids" value="{{ user[0] }}" class="accent-purple-500">
+                        {{ user[1] }} <span class="text-xs text-gray-500">({{ user[0] }})</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 p-2.5 rounded-lg text-sm font-medium">
+                    <i class="fas fa-plus mr-2"></i>Gruppe anlegen
+                </button>
+            </form>
+
+            <div class="xl:col-span-2 space-y-3">
+                {% for group in groups %}
+                <div class="border border-gray-800 rounded-lg p-4">
+                    <form method="POST" action="{{ url_for('edit_user_group', group_id=group.id) }}">
+                        <div class="flex flex-wrap items-center gap-2 mb-3">
+                            <input type="text" name="name" value="{{ group.name }}"
+                                   class="flex-1 min-w-[180px] p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:outline-none text-sm" required>
+                            <button type="submit" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium">
+                                <i class="fas fa-save mr-1"></i>Speichern
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-2">
+                            <i class="fas fa-user-pen mr-1"></i>Erstellt von: {{ group.created_by_name or '—' }}
+                        </p>
+                        <div class="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1 border border-gray-800 rounded-lg p-2">
+                            {% for user in users %}
+                            <label class="flex items-center gap-2 text-sm text-gray-300 px-1 py-0.5">
+                                <input type="checkbox" name="member_ids" value="{{ user[0] }}"
+                                       class="accent-purple-500" {% if user[0] in group.member_ids %}checked{% endif %}>
+                                {{ user[1] }} <span class="text-xs text-gray-500">({{ user[0] }})</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </form>
+                    <form method="POST" action="{{ url_for('delete_user_group', group_id=group.id) }}" class="mt-2"
+                          onsubmit="return confirm('Gruppe wirklich löschen?')">
+                        <button type="submit" class="text-xs text-gray-500 hover:text-red-400">
+                            <i class="fas fa-trash mr-1"></i>Gruppe löschen
+                        </button>
+                    </form>
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500 border border-gray-800 rounded-lg p-4">Noch keine Gruppen angelegt.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}

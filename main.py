@@ -19,7 +19,7 @@ import json
 import re
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
-from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import time
 import zipfile
@@ -86,12 +86,21 @@ def init_user_db():
         c.execute("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'")
     except Exception:
         pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN created_by VARCHAR(100)")
+    except Exception:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS lager
                  (id VARCHAR(100) PRIMARY KEY, name VARCHAR(255) NOT NULL, created_by VARCHAR(100),
                    access_users TEXT, system_type VARCHAR(50) DEFAULT 'personal')''')
     c.execute('''CREATE TABLE IF NOT EXISTS user_groups
                  (id INTEGER PRIMARY KEY AUTO_INCREMENT,
-                  name VARCHAR(255) NOT NULL UNIQUE)''')
+                  name VARCHAR(255) NOT NULL UNIQUE,
+                  created_by VARCHAR(100))''')
+    try:
+        c.execute("ALTER TABLE user_groups ADD COLUMN created_by VARCHAR(100)")
+    except Exception:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS user_group_members
                  (group_id INTEGER NOT NULL,
                   user_id VARCHAR(100) NOT NULL,
@@ -161,6 +170,23 @@ def init_events_db():
                   data LONGBLOB NOT NULL,
                   uploaded_by VARCHAR(100),
                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS app_settings
+                 (setting_key VARCHAR(100) PRIMARY KEY,
+                  setting_value TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS event_requests
+                 (id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                  event_name VARCHAR(255) NOT NULL,
+                  organizer VARCHAR(255),
+                  contact_name VARCHAR(255) NOT NULL,
+                  email VARCHAR(255),
+                  phone VARCHAR(100),
+                  location VARCHAR(255),
+                  start_at DATETIME NULL,
+                  end_at DATETIME NULL,
+                  description TEXT,
+                  status VARCHAR(20) NOT NULL DEFAULT 'new',
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  ip_address VARCHAR(64))''')
     conn.commit()
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -202,15 +228,54 @@ DEVICE_MANUAL_STATUSES = ('verfügbar', 'defekt')
 def get_user_groups():
     conn = get_users_conn()
     c = conn.cursor()
-    c.execute("SELECT id, name FROM user_groups ORDER BY name")
+    c.execute("""SELECT g.id, g.name, g.created_by, COALESCE(u.name, g.created_by)
+                 FROM user_groups g
+                 LEFT JOIN users u ON u.id = g.created_by
+                 ORDER BY g.name""")
     groups = c.fetchall()
     c.execute("SELECT group_id, user_id FROM user_group_members")
     members = {}
     for group_id, user_id in c.fetchall():
         members.setdefault(group_id, []).append(user_id)
     conn.close()
-    return [{'id': group_id, 'name': name, 'member_ids': members.get(group_id, [])}
-            for group_id, name in groups]
+    return [{'id': group_id, 'name': name, 'created_by': created_by,
+             'created_by_name': created_by_name, 'member_ids': members.get(group_id, [])}
+            for group_id, name, created_by, created_by_name in groups]
+
+
+def get_admin_users():
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("""SELECT u.id, u.name, u.role, u.password IS NOT NULL AND u.password != '' AS has_password,
+                        COALESCE(c.name, u.created_by) AS created_by_name
+                 FROM users u
+                 LEFT JOIN users c ON c.id = u.created_by
+                 ORDER BY u.name""")
+    users = c.fetchall()
+    conn.close()
+    return users
+
+
+def get_setting(key, default=None):
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT setting_value FROM app_settings WHERE setting_key = ?", (key,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else default
+
+
+def set_setting(key, value):
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("""INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)
+                 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)""", (key, value))
+    conn.commit()
+    conn.close()
+
+
+def event_requests_enabled():
+    return get_setting('event_requests_enabled', '0') == '1'
 
 
 def active_event_assignment_exists(lager_id, item_id, kind):
@@ -245,7 +310,17 @@ def event_assignment_conflicts(lager_id, item_id, kind, start_at, end_at, event_
               (lager_id, item_id, event_id or -1))
     existing_intervals = c.fetchall()
     conn.close()
+
+    def normalize(value):
+        if value is None:
+            return None
+        return str(value).replace('T', ' ')[:19]
+
+    start_at = normalize(start_at)
+    end_at = normalize(end_at)
     for existing_start, existing_end in existing_intervals:
+        existing_start = normalize(existing_start)
+        existing_end = normalize(existing_end)
         starts_before_new_end = end_at is None or existing_start is None or existing_start < end_at
         ends_after_new_start = start_at is None or existing_end is None or existing_end > start_at
         if starts_before_new_end and ends_after_new_start:
@@ -678,6 +753,7 @@ def create_warehouse_db(lager_id):
                    beschreibung TEXT,
                    lagerplatz TEXT,
                    lagerort TEXT,
+                   gewicht REAL,
                    created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
     try:
         c.execute("ALTER TABLE cases ADD COLUMN lagerort TEXT")
@@ -693,6 +769,12 @@ def create_warehouse_db(lager_id):
             raise
     try:
         c.execute("ALTER TABLE cases ADD COLUMN case_type VARCHAR(50) DEFAULT 'Case'")
+    except Exception as exc:
+        if 'duplicate column' not in str(exc).lower():
+            conn.close()
+            raise
+    try:
+        c.execute("ALTER TABLE cases ADD COLUMN gewicht REAL")
     except Exception as exc:
         if 'duplicate column' not in str(exc).lower():
             conn.close()
@@ -870,9 +952,17 @@ def dashboard():
     c.execute("SELECT id, name FROM lager WHERE created_by = ? OR FIND_IN_SET(?, access_users) > 0 ORDER BY name",
               (session['user_id'], session['user_id']))
     lagers = c.fetchall()
+    c.execute("""SELECT id, event_name, organizer, contact_name, email, phone, location,
+                        start_at, end_at, description, created_at
+                 FROM event_requests
+                 WHERE status = 'new'
+                 ORDER BY created_at DESC
+                 LIMIT 10""")
+    event_requests = c.fetchall()
     conn.close()
     events = get_user_events(session['user_id'], limit=6)
     return render_template('dashboard.html', title="Dashboard", lagers=lagers, events=events,
+                           event_requests=event_requests,
                            is_admin=is_admin(), update_available=UPDATE_AVAILABLE,
                            latest_version=LATEST_VERSION, current_version=VERSION)
 
@@ -945,7 +1035,7 @@ def cases():
     conn = get_db_connection(session['current_lager'])
     c = conn.cursor()
     query = """SELECT c.id, c.name, c.barcode, c.beschreibung, c.lagerplatz, c.lagerort,
-                      COUNT(cd.geraet_id), COALESCE(SUM(g.quantity), 0), c.status, c.case_type
+                      COUNT(cd.geraet_id), COALESCE(SUM(g.quantity), 0), c.status, c.case_type, c.gewicht
                FROM cases c
                LEFT JOIN case_devices cd ON cd.case_id = c.id
                LEFT JOIN geraete g ON g.id = cd.geraet_id
@@ -955,7 +1045,7 @@ def cases():
         query += " AND (c.name LIKE ? OR c.barcode LIKE ? OR c.case_type LIKE ? OR c.beschreibung LIKE ?)"
         params.extend([f'%{search}%'] * 4)
     query += """ GROUP BY c.id, c.name, c.barcode, c.beschreibung, c.lagerplatz, c.lagerort,
-                         c.status, c.case_type
+                         c.status, c.case_type, c.gewicht
                  ORDER BY c.name"""
     c.execute(query, params)
     case_list = c.fetchall()
@@ -981,6 +1071,11 @@ def create_case():
     beschreibung = (request.form.get('beschreibung') or '').strip()
     lagerplatz = (request.form.get('lagerplatz') or '').strip()
     lagerort = (request.form.get('lagerort') or '').strip()
+    gewicht_raw = (request.form.get('gewicht') or '').strip().replace(',', '.')
+    try:
+        gewicht = float(gewicht_raw) if gewicht_raw else None
+    except ValueError:
+        gewicht = None
     status = request.form.get('status')
     if status not in CASE_STATUS_VALUES:
         status = 'verfügbar'
@@ -1000,8 +1095,8 @@ def create_case():
             c.execute("SELECT id FROM cases WHERE barcode = ?", (barcode,))
             if not c.fetchone():
                 break
-    c.execute("INSERT INTO cases (name, barcode, beschreibung, lagerplatz, lagerort, status, case_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
-              (name, barcode, beschreibung, lagerplatz, lagerort, status, case_type))
+    c.execute("INSERT INTO cases (name, barcode, beschreibung, lagerplatz, lagerort, status, case_type, gewicht) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              (name, barcode, beschreibung, lagerplatz, lagerort, status, case_type, gewicht))
     conn.commit()
     conn.close()
     flash(f'Case „{name}" wurde angelegt.')
@@ -1016,7 +1111,7 @@ def case_detail(case_id):
     create_warehouse_db(session['current_lager'])
     conn = get_db_connection(session['current_lager'])
     c = conn.cursor()
-    c.execute("SELECT id, name, barcode, beschreibung, lagerplatz, lagerort, status, case_type FROM cases WHERE id = ?", (case_id,))
+    c.execute("SELECT id, name, barcode, beschreibung, lagerplatz, lagerort, status, case_type, gewicht FROM cases WHERE id = ?", (case_id,))
     case = c.fetchone()
     if not case:
         conn.close()
@@ -1086,6 +1181,11 @@ def edit_case(case_id):
     beschreibung = (request.form.get('beschreibung') or '').strip()
     lagerplatz = (request.form.get('lagerplatz') or '').strip()
     lagerort = (request.form.get('lagerort') or '').strip()
+    gewicht_raw = (request.form.get('gewicht') or '').strip().replace(',', '.')
+    try:
+        gewicht = float(gewicht_raw) if gewicht_raw else None
+    except ValueError:
+        gewicht = None
     status = request.form.get('status')
     case_type = request.form.get('case_type')
     if name:
@@ -1102,8 +1202,8 @@ def edit_case(case_id):
             status = 'verfügbar'
         if case_type not in CASE_TYPE_VALUES:
             case_type = 'Case'
-        c.execute("UPDATE cases SET name = ?, beschreibung = ?, lagerplatz = ?, lagerort = ?, status = ?, case_type = ? WHERE id = ?",
-                  (name, beschreibung, lagerplatz, lagerort, status, case_type, case_id))
+        c.execute("UPDATE cases SET name = ?, beschreibung = ?, lagerplatz = ?, lagerort = ?, status = ?, case_type = ?, gewicht = ? WHERE id = ?",
+                  (name, beschreibung, lagerplatz, lagerort, status, case_type, gewicht, case_id))
         conn.commit()
         conn.close()
     return redirect(url_for('case_detail', case_id=case_id))
@@ -1133,18 +1233,125 @@ def events():
     return render_template('events.html', title="Events", events=event_list)
 
 
+@app.route('/event-requests/<int:request_id>/done', methods=['POST'])
+def event_request_done(request_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("UPDATE event_requests SET status = 'done' WHERE id = ?", (request_id,))
+    conn.commit()
+    conn.close()
+    flash('Event-Anfrage wurde als erledigt markiert.')
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/events/request', methods=['GET', 'POST'])
+def event_request():
+    if not event_requests_enabled():
+        return render_template('event_request_disabled.html', title="Event-Anfrage")
+
+    if request.method == 'POST':
+        if (request.form.get('website') or '').strip():
+            return redirect(url_for('event_request', submitted=1))
+
+        event_name = (request.form.get('event_name') or '').strip()
+        organizer = (request.form.get('organizer') or '').strip()
+        contact_name = (request.form.get('contact_name') or '').strip()
+        email = (request.form.get('email') or '').strip()
+        phone = (request.form.get('phone') or '').strip()
+        location = (request.form.get('location') or '').strip()
+        description = (request.form.get('description') or '').strip()
+        start_at = parse_event_datetime(request.form.get('start_at'))
+        end_at = parse_event_datetime(request.form.get('end_at'))
+
+        errors = []
+        if not event_name:
+            errors.append('Ein Veranstaltungsname ist erforderlich.')
+        if not contact_name:
+            errors.append('Ein Kontaktname ist erforderlich.')
+        if not email or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+            errors.append('Eine gültige E-Mail-Adresse ist erforderlich.')
+        if not start_at:
+            errors.append('Ein Beginn ist erforderlich.')
+        if start_at and end_at and end_at < start_at:
+            errors.append('Das Ende muss nach dem Beginn liegen.')
+
+        if errors:
+            for message in errors:
+                flash(message, 'error')
+            return render_template('event_request.html', title="Event-Anfrage", form=request.form)
+
+        conn = get_users_conn()
+        c = conn.cursor()
+        c.execute("""INSERT INTO event_requests
+                     (event_name, organizer, contact_name, email, phone, location,
+                      start_at, end_at, description, ip_address)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (event_name, organizer, contact_name, email, phone, location,
+                   start_at, end_at, description, request.remote_addr))
+        conn.commit()
+        conn.close()
+        return redirect(url_for('event_request', submitted=1))
+
+    if request.args.get('submitted') == '1':
+        return render_template('event_request_success.html', title="Event-Anfrage gesendet")
+    return render_template('event_request.html', title="Event-Anfrage", form={})
+
+
 @app.route('/events/create', methods=['GET', 'POST'])
 def event_create():
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
+    request_id = request.form.get('request_id', type=int) or request.args.get('request_id', type=int)
+    event_request = None
+    if request_id:
+        conn = get_users_conn()
+        c = conn.cursor()
+        c.execute("""SELECT id, event_name, organizer, contact_name, email, phone, location,
+                            start_at, end_at, description
+                     FROM event_requests WHERE id = ? AND status = 'new'""", (request_id,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            event_request = {
+                'id': row[0], 'event_name': row[1], 'organizer': row[2],
+                'contact_name': row[3], 'email': row[4], 'phone': row[5],
+                'location': row[6], 'start_at': row[7], 'end_at': row[8],
+                'description': row[9],
+            }
+
     lagers = get_accessible_lagers(session['user_id'], is_admin())
     if request.method == 'POST':
-        return save_event(None, lagers)
+        return save_event(None, lagers, request_id=request_id if event_request else None)
+
+    if event_request:
+        description_parts = [event_request['description'] or '']
+        if event_request['location']:
+            description_parts.append(f"Ort: {event_request['location']}")
+        if event_request['phone']:
+            description_parts.append(f"Telefon: {event_request['phone']}")
+        event = {
+            'id': None,
+            'name': event_request['event_name'],
+            'organizer': event_request['organizer'],
+            'description': '\n'.join(part for part in description_parts if part),
+            'lager_id': None,
+            'start_at': str(event_request['start_at']) if event_request['start_at'] else None,
+            'end_at': str(event_request['end_at']) if event_request['end_at'] else None,
+            'created_by': None,
+            'created_at': None,
+        }
+        contacts = [{'name': event_request['contact_name'], 'email': event_request['email']}]
+        return render_template('event_form.html', title="Event aus Anfrage erstellen", mode='create',
+                               event=event, request_id=event_request['id'],
+                               lagers=lagers, selected_lager_ids=[], selected_case_ids=[],
+                               selected_devices={}, contacts=contacts)
 
     return render_template('event_form.html', title="Neues Event", mode='create', event=None,
-                           lagers=lagers, selected_lager_ids=[], selected_case_ids=[],
-                           selected_devices={}, contacts=[])
+                           request_id=None, lagers=lagers, selected_lager_ids=[],
+                           selected_case_ids=[], selected_devices={}, contacts=[])
 
 
 @app.route('/events/<int:event_id>/edit', methods=['GET', 'POST'])
@@ -1190,7 +1397,14 @@ def event_edit(event_id):
                            contacts=contacts)
 
 
-def save_event(event_id, lagers):
+def save_event(event_id, lagers, request_id=None):
+    is_new_event = event_id is None
+
+    def form_redirect():
+        if is_new_event and request_id:
+            return redirect(url_for('event_create', request_id=request_id))
+        return redirect(request.url)
+
     name = (request.form.get('name') or '').strip()
     lager_ids = list(dict.fromkeys(value.strip() for value in request.form.getlist('lager_ids') if value.strip()))
     lager_id = lager_ids[0] if lager_ids else ''
@@ -1201,15 +1415,15 @@ def save_event(event_id, lagers):
 
     if start_at and end_at and end_at < start_at:
         flash('Das Event-Ende muss nach dem Beginn liegen.', 'error')
-        return redirect(request.url)
+        return form_redirect()
 
     if not name:
         flash('Ein Veranstaltungsname ist erforderlich.')
-        return redirect(request.url)
+        return form_redirect()
     accessible_ids = {str(row[0]) for row in lagers}
     if not lager_ids or any(value not in accessible_ids for value in lager_ids):
         flash('Bitte wähle mindestens ein Lager aus, auf das du Zugriff hast.')
-        return redirect(request.url)
+        return form_redirect()
 
     selected_case_ids = []
     selected_devices = []
@@ -1356,6 +1570,10 @@ def save_event(event_id, lagers):
     for contact_name, contact_email in contacts:
         c.execute("INSERT INTO event_contacts (event_id, name, email) VALUES (?, ?, ?)",
                   (event_id, contact_name, contact_email))
+
+    if is_new_event and request_id:
+        c.execute("UPDATE event_requests SET status = 'done' WHERE id = ? AND status = 'new'",
+                  (request_id,))
 
     conn.commit()
     conn.close()
@@ -1510,7 +1728,8 @@ def event_material_pdf(event_id):
     selected_devices = c.fetchall()
     conn.close()
 
-    rows = [['IDs / Barcodes', 'Name', 'Anzahl', 'Lagerort / Raum', 'Lagerplatz', 'Ergänzungen', '✓']]
+    rows = [['IDs / Barcodes', 'Name', 'Anzahl', 'Lagerort / Raum', 'Lagerplatz',
+             'Case / Koffer / Rack', 'Ergänzungen', '✓']]
     grouped_devices = {}
     for lager_id in lager_ids:
         # A user may request the PDF directly from an already-open event page.
@@ -1518,37 +1737,45 @@ def event_material_pdf(event_id):
         create_warehouse_db(lager_id)
         warehouse_conn = get_db_connection(lager_id)
         wc = warehouse_conn.cursor()
+        wc.execute("SELECT id, name, case_type FROM cases")
+        case_lookup = {row[0]: {'name': row[1], 'type': row[2] or 'Case'} for row in wc.fetchall()}
         for case_lager, case_id in selected_cases:
             if case_lager != lager_id:
                 continue
             wc.execute("SELECT barcode, name, lagerort, lagerplatz FROM cases WHERE id = ?", (case_id,))
             case_row = wc.fetchone()
             if case_row:
-                rows.append([case_row[0] or str(case_id), case_row[1], '1', case_row[2] or '', case_row[3] or '', '', ''])
+                case_info = case_lookup.get(case_id, {})
+                rows.append([case_row[0] or str(case_id), case_row[1], '1', case_row[2] or '',
+                             case_row[3] or '', case_info.get('type') or 'Case', '', ''])
         for device_lager, device_id, case_id, quantity in selected_devices:
             if device_lager != lager_id:
                 continue
             wc.execute("SELECT barcode, name, lagerort, lagerplatz FROM geraete WHERE id = ?", (device_id,))
             device_row = wc.fetchone()
             if device_row:
-                group_key = (lager_id, device_row[1], device_row[2] or '', device_row[3] or '')
+                case_info = case_lookup.get(case_id, {})
+                case_label = ''
+                if case_info:
+                    case_label = f"{case_info.get('type') or 'Case'}: {case_info.get('name') or ''}".strip()
+                group_key = (lager_id, device_row[1], device_row[2] or '', device_row[3] or '', case_label)
                 group = grouped_devices.setdefault(group_key, {'ids': [], 'quantity': 0})
                 group['ids'].append(device_row[0] or str(device_id))
                 group['quantity'] += quantity or 1
         warehouse_conn.close()
 
-    for (_, name, room, shelf), group in grouped_devices.items():
-        rows.append([', '.join(map(str, group['ids'])), name, str(group['quantity']), room, shelf, '', ''])
+    for (_, name, room, shelf, case_label), group in grouped_devices.items():
+        rows.append([', '.join(map(str, group['ids'])), name, str(group['quantity']), room, shelf, case_label, '', ''])
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=24, leftMargin=24,
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=20, leftMargin=20,
                             topMargin=24, bottomMargin=24)
     styles = getSampleStyleSheet()
     escaped_event_name = str(event[0]).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     story = [Paragraph(f"Materialliste – {escaped_event_name}", styles['Title']), Spacer(1, 10)]
     safe_rows = [[Paragraph(str(value).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'),
                             styles['BodyText']) for value in row] for row in rows]
-    table = Table(safe_rows, colWidths=[82, 132, 44, 100, 95, 230, 30], repeatRows=1)
+    table = Table(safe_rows, colWidths=[64, 95, 30, 62, 55, 90, 105, 18], repeatRows=1)
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#263449')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -1564,6 +1791,148 @@ def event_material_pdf(event_id):
     buffer.seek(0)
     return send_file(buffer, mimetype='application/pdf', as_attachment=True,
                      download_name=f"materialliste_event_{event_id}.pdf")
+
+
+@app.route('/events/<int:event_id>/contract.pdf')
+def event_contract_pdf(event_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if not event_can_view(event_id, session['user_id']):
+        flash('Du hast keinen Zugriff auf dieses Event.')
+        return redirect(url_for('events'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("""SELECT name, organizer, description, lager_id, start_at, end_at, created_by, created_at
+                 FROM events WHERE id = ?""", (event_id,))
+    event = c.fetchone()
+    if not event:
+        conn.close()
+        return redirect(url_for('events'))
+    c.execute("SELECT name, email FROM event_contacts WHERE event_id = ? ORDER BY id", (event_id,))
+    contacts = c.fetchall()
+    c.execute("SELECT lager_id FROM event_lagers WHERE event_id = ?", (event_id,))
+    lager_ids = [row[0] for row in c.fetchall()] or [event[3]]
+    c.execute("SELECT lager_id, case_id FROM event_cases WHERE event_id = ?", (event_id,))
+    selected_cases = c.fetchall()
+    c.execute("SELECT lager_id, device_id, case_id, quantity FROM event_devices WHERE event_id = ?", (event_id,))
+    selected_devices = c.fetchall()
+    conn.close()
+
+    lager_names = [get_lager_name(lager_id) for lager_id in lager_ids]
+    rows = [['Pos.', 'Bezeichnung', 'IDs / Barcodes', 'Case / Koffer / Rack', 'Menge']]
+    position = 0
+    device_groups = {}
+    for lager_id in lager_ids:
+        create_warehouse_db(lager_id)
+        warehouse_conn = get_db_connection(lager_id)
+        wc = warehouse_conn.cursor()
+        wc.execute("SELECT id, name, case_type FROM cases")
+        case_lookup = {row[0]: {'name': row[1], 'type': row[2] or 'Case'} for row in wc.fetchall()}
+        for case_lager, case_id in selected_cases:
+            if case_lager != lager_id:
+                continue
+            wc.execute("SELECT barcode, name, case_type FROM cases WHERE id = ?", (case_id,))
+            case_row = wc.fetchone()
+            if case_row:
+                position += 1
+                rows.append([str(position), f"{case_row[2] or 'Case'}: {case_row[1]}",
+                             case_row[0] or str(case_id), '—', '1'])
+        for device_lager, device_id, case_id, quantity in selected_devices:
+            if device_lager != lager_id:
+                continue
+            wc.execute("SELECT barcode, name FROM geraete WHERE id = ?", (device_id,))
+            device_row = wc.fetchone()
+            if not device_row:
+                continue
+            case_info = case_lookup.get(case_id)
+            case_label = f"{case_info.get('type') or 'Case'}: {case_info.get('name')}" if case_info else '—'
+            group_key = (lager_id, device_row[1], case_label)
+            group = device_groups.setdefault(group_key, {'barcodes': [], 'quantity': 0})
+            group['barcodes'].append(device_row[0] or str(device_id))
+            group['quantity'] += quantity or 1
+        warehouse_conn.close()
+
+    for (_, name, case_label), group in device_groups.items():
+        position += 1
+        rows.append([str(position), name, ', '.join(map(str, group['barcodes'])), case_label,
+                     str(group['quantity'])])
+
+    def esc(value):
+        return str(value or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+    borrower = event[1] or (contacts[0][0] if contacts else event[6]) or '—'
+    lender = ', '.join(name for name in lager_names if name) or 'DMS Lagersystem'
+    event_period = f"{event[4] or 'nicht festgelegt'} bis {event[5] or 'offen'}"
+    contact_text = ', '.join(name for name, _ in contacts) or '—'
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('ContractTitle', parent=styles['Title'], fontSize=20, leading=24,
+                                 spaceAfter=14, alignment=TA_CENTER)
+    heading_style = ParagraphStyle('ContractHeading', parent=styles['Heading2'], fontSize=11,
+                                   leading=14, spaceBefore=12, spaceAfter=5)
+    body_style = ParagraphStyle('ContractBody', parent=styles['BodyText'], fontSize=9,
+                                leading=13, spaceAfter=4)
+    small_style = ParagraphStyle('ContractSmall', parent=styles['BodyText'], fontSize=8, leading=10)
+
+    story = [
+        Paragraph('Verleihvertrag', title_style),
+        Paragraph(f"Veranstaltung: <b>{esc(event[0])}</b>", body_style),
+        Spacer(1, 6),
+        Paragraph(f"<b>Verleiher:</b> {esc(lender)}", body_style),
+        Paragraph(f"<b>Entleiher:</b> {esc(borrower)}", body_style),
+        Paragraph(f"<b>Zeitraum:</b> {esc(event_period)}", body_style),
+        Paragraph(f"<b>Kontaktpersonen:</b> {esc(contact_text)}", body_style),
+        Spacer(1, 8),
+        Paragraph('1. Vertragsgegenstand', heading_style),
+        Paragraph('Der Verleiher überlässt dem Entleiher die nachfolgend aufgeführten Geräte und '
+                  'Transportbehältnisse für die Dauer der oben genannten Veranstaltung.', body_style),
+    ]
+
+    safe_rows = []
+    for row in rows:
+        safe_rows.append([Paragraph(esc(value), small_style) for value in row])
+    table = Table(safe_rows, colWidths=[26, 145, 145, 145, 40], repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#263449')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 8),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#718096')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#edf2f7')]),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4), ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(table)
+    story.extend([
+        Paragraph('2. Rückgabe und Nutzung', heading_style),
+        Paragraph('Die Geräte sind spätestens zum vereinbarten Veranstaltungsende vollständig und '
+                  'in ordnungsgemäßem Zustand zurückzugeben. Der Entleiher verpflichtet sich zu einem '
+                  'sorgfältigen Umgang und darf die Geräte nicht ohne Zustimmung an Dritte weitergeben.', body_style),
+        Paragraph('3. Haftung und Schäden', heading_style),
+        Paragraph('Für Schäden, Verluste oder einen über die vereinbarte Nutzung hinausgehenden Gebrauch '
+                  'haftet der Entleiher nach den gesetzlichen Bestimmungen. Festgestellte Schäden sind '
+                  'unverzüglich zu melden.', body_style),
+        Paragraph('4. Sonstiges', heading_style),
+        Paragraph('Änderungen und Ergänzungen dieses Vertrags bedürfen der Schriftform. Sollten einzelne '
+                  'Regelungen unwirksam sein, bleibt die Wirksamkeit der übrigen Regelungen unberührt.', body_style),
+        Spacer(1, 20),
+        Paragraph(f"Ort, Datum: ______________________________    {esc(datetime.now().strftime('%d.%m.%Y'))}", body_style),
+        Spacer(1, 24),
+        Paragraph('_______________________________<br/>Unterschrift Verleiher', body_style),
+        Spacer(1, 24),
+        Paragraph('_______________________________<br/>Unterschrift Entleiher', body_style),
+    ])
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40,
+                            topMargin=40, bottomMargin=40,
+                            title=f'Verleihvertrag {event[0]}')
+    doc.build(story)
+    buffer.seek(0)
+    return send_file(buffer, mimetype='application/pdf', as_attachment=True,
+                     download_name=f"verleihvertrag_event_{event_id}.pdf")
 
 
 @app.route('/events/<int:event_id>/attachments', methods=['POST'])
@@ -3391,23 +3760,64 @@ def export():
                         mimetype='text/csv', as_attachment=True, download_name='export.csv')
     
     elif format_type == 'word_labels':
-        # Printable Word labels: 3 columns, one label per device, respecting current filters.
+        # Printable Word labels: 3 columns, no page/cell border, fixed label size.
         doc = Document()
-        doc.add_heading('Geräteetiketten', 0)
+        section = doc.sections[0]
+        section.page_width = Cm(21)
+        section.page_height = Cm(29.7)
+        section.top_margin = Cm(0)
+        section.bottom_margin = Cm(0)
+        section.left_margin = Cm(0)
+        section.right_margin = Cm(0)
+
         table = doc.add_table(rows=0, cols=3)
-        table.style = 'Table Grid'
+        table.autofit = False
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table_borders = parse_xml(
+            r'<w:tblBorders xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            r'<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/>'
+            r'<w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/>'
+            r'</w:tblBorders>'
+        )
+        table._tbl.tblPr.append(table_borders)
+        cell_margins = parse_xml(
+            r'<w:tblCellMar xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            r'<w:top w:w="57" w:type="dxa"/><w:left w:w="57" w:type="dxa"/>'
+            r'<w:bottom w:w="57" w:type="dxa"/><w:right w:w="57" w:type="dxa"/>'
+            r'</w:tblCellMar>'
+        )
+        table._tbl.tblPr.append(cell_margins)
+        for column in table.columns:
+            column.width = Cm(7)
+
+        def label_text(value, limit):
+            text = str(value or '').strip()
+            return text if len(text) <= limit else text[:limit - 3].rstrip() + '...'
+
         for offset in range(0, len(devices_list), 3):
-            cells = table.add_row().cells
+            row = table.add_row()
+            row.height = Cm(4.95)
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
             for column in range(3):
+                cell = row.cells[column]
+                cell.width = Cm(7)
+                cell.text = ''
                 if offset + column >= len(devices_list):
                     continue
                 device = devices_list[offset + column]
-                cell = cells[column]
-                cell.text = ''
                 paragraph = cell.paragraphs[0]
-                paragraph.add_run(str(device[1] or 'Gerät')).bold = True
-                paragraph.add_run(f"\nID: {device[0]}  |  Barcode: {device[2] or ''}")
-                paragraph.add_run(f"\nRaum: {device[19] or '—'}  |  Platz: {device[3] or '—'}")
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
+                paragraph.paragraph_format.line_spacing = 1
+                name_run = paragraph.add_run(label_text(device[1] or 'Gerät', 34))
+                name_run.bold = True
+                name_run.font.size = Pt(9)
+                details_run = paragraph.add_run(
+                    f"\nID: {device[0]} | {label_text(device[2] or '', 24)}"
+                    f"\nRaum: {label_text(device[19] or '-', 16)} | Platz: {label_text(device[3] or '-', 16)}"
+                )
+                details_run.font.size = Pt(7.5)
+
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)
@@ -3417,27 +3827,26 @@ def export():
     elif format_type == 'word':
         doc = Document()
         doc.add_heading('Geräte Export', 0)
-        
-        table = doc.add_table(rows=1, cols=21)
+
+        headers = ['ID', 'Name', 'Barcode', 'Lagerort / Raum', 'Lagerplatz',
+                   'Kategorie', 'Modell', 'Seriennummer', 'Anzahl', 'Status']
+        table = doc.add_table(rows=1, cols=len(headers))
+        table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
-        headers = ['ID', 'Name', 'Barcode', 'Raum', 'Lagerplatz', 'Status', 'Anzahl', 'Beschreibung', 'Seriennummer', 'Modell', 'Hersteller', 'Kategorie', 'Kaufdatum', 'Kaufpreis', 'Mietpreis', 'DMX-Kanalbelegung', 'Ausgeliehen an', 'Ausleihziel', 'Ausleihdatum', 'E-Mail', 'Klasse']
-        
         for i, header in enumerate(headers):
             hdr_cells[i].text = header
-        
+
         for device in devices_list:
             row_cells = table.add_row().cells
-            dmx_text = '; '.join(f"{item['channel']} = {item['function']}" for item in _decode_dmx_channel_map(device[24]))
-            values = [device[0], device[1], device[2], device[19], device[3], device[4], device[12] or 1,
-                      device[5], device[6], device[7], device[13], device[8], device[10], device[11], device[20],
-                      dmx_text, device[14], device[15], device[16], device[17], device[18]]
+            values = [device[0], device[1], device[2], device[19], device[3],
+                      device[8], device[7], device[6], device[12] or 1, device[4]]
             for cell, value in zip(row_cells, values):
                 cell.text = '' if value is None else str(value)
-        
+
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)
-        return send_file(buffer, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+        return send_file(buffer, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                         as_attachment=True, download_name='export.docx')
     
     elif format_type == 'pdf_labels':
@@ -3476,9 +3885,21 @@ def export():
         labels_per_page = labels_per_row * labels_per_col
         
         buffer = BytesIO()
-        
+
+        weight_conn = get_db_connection(session['current_lager'])
+        weight_cursor = weight_conn.cursor()
+        weight_cursor.execute("""SELECT cd.geraet_id, c.gewicht
+                                 FROM case_devices cd
+                                 JOIN cases c ON c.id = cd.case_id
+                                 WHERE c.gewicht IS NOT NULL""")
+        case_weights = {row[0]: row[1] for row in weight_cursor.fetchall()}
+        weight_conn.close()
+
         def get_field_value(device, field_type):
             """Get the actual value for a field type from device data"""
+            if field_type == 'gewicht':
+                weight = case_weights.get(device[0])
+                return f"{weight:g} kg" if weight is not None else ''
             field_mapping = {
                 'name': device[1],
                 'barcode': device[2],
@@ -3889,11 +4310,59 @@ def verwaltung():
 
     conn = get_users_conn()
     c = conn.cursor()
-    c.execute("SELECT id, name, role, password IS NOT NULL AND password != '' AS has_password FROM users ORDER BY name")
-    users = c.fetchall()
+    c.execute("SELECT COUNT(*) FROM users")
+    user_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM user_groups")
+    group_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM event_requests WHERE status = 'new'")
+    request_count = c.fetchone()[0]
     conn.close()
-    return render_template('verwaltung.html', title="Verwaltung", users=users,
-                           groups=get_user_groups())
+    return render_template('verwaltung.html', title="Verwaltung",
+                           user_count=user_count, group_count=group_count,
+                           request_count=request_count)
+
+
+@app.route('/verwaltung/system')
+def verwaltung_system():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+    return render_template('verwaltung_system.html', title="Gesamtsystem übertragen")
+
+
+@app.route('/verwaltung/benutzer')
+def verwaltung_benutzer():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+    return render_template('verwaltung_benutzer.html', title="Benutzer",
+                           users=get_admin_users())
+
+
+@app.route('/verwaltung/gruppen')
+def verwaltung_gruppen():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+    return render_template('verwaltung_gruppen.html', title="Benutzergruppen",
+                           users=get_admin_users(), groups=get_user_groups())
+
+
+@app.route('/verwaltung/event-anfragen', methods=['GET', 'POST'])
+def verwaltung_event_requests():
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        enabled = request.form.get('enabled') == '1'
+        set_setting('event_requests_enabled', '1' if enabled else '0')
+        flash('Event-Anfragen wurden aktiviert.' if enabled else 'Event-Anfragen wurden deaktiviert.')
+        return redirect(url_for('verwaltung_event_requests'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM event_requests WHERE status = 'new'")
+    request_count = c.fetchone()[0]
+    conn.close()
+    return render_template('verwaltung_event_requests.html', title="Event-Anfragen",
+                           enabled=event_requests_enabled(), request_count=request_count)
 
 
 @app.route('/verwaltung/system-export', methods=['GET'])
@@ -3905,7 +4374,7 @@ def admin_system_export():
     except Exception as exc:
         app.logger.exception('Systemexport fehlgeschlagen')
         flash(f'Der Systemexport ist fehlgeschlagen: {exc}', 'error')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_system'))
     filename = f"dms-systemexport-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
     return send_file(archive, mimetype='application/zip', as_attachment=True, download_name=filename)
 
@@ -3916,16 +4385,16 @@ def admin_system_import():
         return redirect(url_for('login'))
     if request.form.get('confirm_text', '').strip() != 'ERSETZEN':
         flash('Import abgebrochen: Bitte zur Bestätigung ERSETZEN eingeben.', 'error')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_system'))
 
     upload = request.files.get('backup_file')
     if not upload or not upload.filename:
         flash('Bitte eine DMS-Systemexport-ZIP-Datei auswählen.', 'error')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_system'))
     archive_bytes = upload.stream.read(SYSTEM_BACKUP_MAX_BYTES + 1)
     if len(archive_bytes) > SYSTEM_BACKUP_MAX_BYTES:
         flash('Die Sicherungsdatei ist größer als 512 MB.', 'error')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_system'))
 
     try:
         with zipfile.ZipFile(BytesIO(archive_bytes), 'r') as archive:
@@ -3936,7 +4405,7 @@ def admin_system_import():
         _validate_system_backup(payload)
     except Exception as exc:
         flash(f'Die Sicherungsdatei ist ungültig: {exc}', 'error')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_system'))
 
     timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     backup_dir = Path(app.root_path) / 'system_backups'
@@ -3948,7 +4417,7 @@ def admin_system_import():
     except Exception as exc:
         app.logger.exception('Sicherheitsbackup vor Import fehlgeschlagen')
         flash(f'Import nicht ausgeführt: Das Sicherheitsbackup konnte nicht erstellt werden ({exc}).', 'error')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_system'))
 
     try:
         imported_lager_ids = set(payload['warehouses'])
@@ -3972,7 +4441,7 @@ def admin_system_import():
     except Exception as exc:
         app.logger.exception('Systemimport fehlgeschlagen')
         flash(f'Import fehlgeschlagen. Die vorherige Sicherung liegt unter {backup_path}. Fehler: {exc}', 'error')
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_system'))
 
 
 @app.route('/verwaltung/benutzer', methods=['POST'])
@@ -3991,8 +4460,8 @@ def create_user():
         conn = get_users_conn()
         c = conn.cursor()
         try:
-            c.execute("INSERT INTO users (id, name, password, role) VALUES (?, ?, ?, ?)",
-                      (user_id, name, generate_password_hash(password), role))
+            c.execute("INSERT INTO users (id, name, password, role, created_by) VALUES (?, ?, ?, ?, ?)",
+                      (user_id, name, generate_password_hash(password), role, session.get('user_id')))
             conn.commit()
             flash(f'Benutzer {user_id} wurde angelegt.')
         except Exception:
@@ -4003,7 +4472,26 @@ def create_user():
     else:
         flash('Benutzer-ID, Name und Passwort sind erforderlich.')
 
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_benutzer'))
+
+
+@app.route('/verwaltung/benutzer/<user_id>/name', methods=['POST'])
+def update_user_name(user_id):
+    if 'user_id' not in session or not is_admin():
+        return redirect(url_for('login'))
+
+    name = (request.form.get('name') or '').strip()
+    if not name:
+        flash('Vor- und Nachname sind erforderlich.')
+        return redirect(url_for('verwaltung_benutzer'))
+
+    conn = get_users_conn()
+    c = conn.cursor()
+    c.execute("UPDATE users SET name = ? WHERE id = ?", (name, user_id))
+    conn.commit()
+    conn.close()
+    flash(f'Name von {user_id} wurde aktualisiert.')
+    return redirect(url_for('verwaltung_benutzer'))
 
 
 @app.route('/verwaltung/benutzer/<user_id>/passwort', methods=['POST'])
@@ -4020,7 +4508,7 @@ def reset_user_password(user_id):
         conn.commit()
         conn.close()
         flash(f'Passwort für {user_id} wurde aktualisiert.')
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_benutzer'))
 
 
 @app.route('/verwaltung/benutzer/<user_id>/rolle', methods=['POST'])
@@ -4038,7 +4526,7 @@ def set_user_role(user_id):
         conn.commit()
         conn.close()
         flash(f'Rolle von {user_id} wurde geändert.')
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_benutzer'))
 
 
 @app.route('/verwaltung/benutzer/<user_id>/loeschen', methods=['POST'])
@@ -4054,7 +4542,7 @@ def delete_user(user_id):
         conn.commit()
         conn.close()
         flash(f'Benutzer {user_id} wurde gelöscht.')
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_benutzer'))
 
 
 @app.route('/verwaltung/gruppen', methods=['POST'])
@@ -4066,12 +4554,13 @@ def create_user_group():
     member_ids = list(dict.fromkeys(request.form.getlist('member_ids')))
     if not name:
         flash('Ein Gruppenname ist erforderlich.')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_gruppen'))
 
     conn = get_users_conn()
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO user_groups (name) VALUES (?)", (name,))
+        c.execute("INSERT INTO user_groups (name, created_by) VALUES (?, ?)",
+                  (name, session.get('user_id')))
         group_id = c.lastrowid
         for member_id in member_ids:
             c.execute("INSERT IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)",
@@ -4083,7 +4572,7 @@ def create_user_group():
         flash(f'Gruppe „{name}" existiert bereits oder konnte nicht angelegt werden.')
     finally:
         conn.close()
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_gruppen'))
 
 
 @app.route('/verwaltung/gruppen/<int:group_id>/bearbeiten', methods=['POST'])
@@ -4095,7 +4584,7 @@ def edit_user_group(group_id):
     member_ids = list(dict.fromkeys(request.form.getlist('member_ids')))
     if not name:
         flash('Ein Gruppenname ist erforderlich.')
-        return redirect(url_for('verwaltung'))
+        return redirect(url_for('verwaltung_gruppen'))
 
     conn = get_users_conn()
     c = conn.cursor()
@@ -4112,7 +4601,7 @@ def edit_user_group(group_id):
         flash(f'Gruppe „{name}" konnte nicht gespeichert werden.')
     finally:
         conn.close()
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_gruppen'))
 
 
 @app.route('/verwaltung/gruppen/<int:group_id>/loeschen', methods=['POST'])
@@ -4127,7 +4616,7 @@ def delete_user_group(group_id):
     conn.commit()
     conn.close()
     flash('Gruppe wurde gelöscht.')
-    return redirect(url_for('verwaltung'))
+    return redirect(url_for('verwaltung_gruppen'))
 
 
 @app.route('/passwort', methods=['GET', 'POST'])

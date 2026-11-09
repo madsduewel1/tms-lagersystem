@@ -498,9 +498,15 @@
             document.querySelectorAll('[id^="group-content-"]').forEach(content => {
                 const groupId = content.id.replace('group-content-', '');
                 const expanded = localStorage.getItem(`group-${groupId}-expanded`);
-                if (expanded === 'false') {
+                const icon = document.getElementById(`group-icon-${groupId}`);
+                if (expanded === 'true') {
+                    content.classList.remove('hidden');
+                    if (icon) {
+                        icon.classList.remove('fa-chevron-right');
+                        icon.classList.add('fa-chevron-down');
+                    }
+                } else {
                     content.classList.add('hidden');
-                    const icon = document.getElementById(`group-icon-${groupId}`);
                     if (icon) {
                         icon.classList.remove('fa-chevron-down');
                         icon.classList.add('fa-chevron-right');

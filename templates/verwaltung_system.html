@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="w-full">
+    <a href="{{ url_for('verwaltung') }}" class="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-4">
+        <i class="fas fa-arrow-left"></i>Verwaltung
+    </a>
+    <h1 class="text-2xl font-semibold mb-6">
+        <i class="fas fa-database mr-2"></i>Gesamtsystem übertragen
+    </h1>
+
+    <section class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6 mb-6">
+        <div class="flex items-start gap-3 mb-4">
+            <i class="fas fa-database text-blue-400 mt-1"></i>
+            <div>
+                <h2 class="font-semibold">Gesamtsystem übertragen</h2>
+                <p class="text-sm text-gray-400 mt-1">Exportiert Benutzer, Lager, Geräte, Cases, Ausleihen, Events, Berechtigungen und Etikettenlayouts in eine ZIP-Datei. Der Export kann in eine andere DMS-Installation importiert werden.</p>
+                <p class="text-xs text-amber-300 mt-2">Ein Import ersetzt die vorhandenen Daten dieses Systems vollständig. Vorher wird automatisch eine Sicherung auf dem Server angelegt. Die Exportdatei enthält auch Passwort-Hashes und sollte vertraulich behandelt werden.</p>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <div class="border border-gray-800 rounded-lg p-4">
+                <h3 class="text-sm font-medium mb-3">Gesamtexport herunterladen</h3>
+                <a href="{{ url_for('admin_system_export') }}" class="inline-flex items-center px-4 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium">
+                    <i class="fas fa-file-export mr-2"></i>DMS-Systemexport herunterladen
+                </a>
+            </div>
+            <form method="POST" action="{{ url_for('admin_system_import') }}" enctype="multipart/form-data" class="border border-red-900/60 rounded-lg p-4">
+                <h3 class="text-sm font-medium mb-2">Systemexport importieren</h3>
+                <label for="backup_file" class="block text-xs text-gray-400 mb-2">DMS-Systemexport (.zip, maximal 512 MB)</label>
+                <input type="file" id="backup_file" name="backup_file" accept=".zip,application/zip" required class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100 mb-3">
+                <label for="confirm_text" class="block text-xs text-gray-400 mb-2">Zum Bestätigen ERSETZEN eingeben</label>
+                <input type="text" id="confirm_text" name="confirm_text" autocomplete="off" required class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:outline-none mb-3">
+                <button type="submit" class="inline-flex items-center px-4 py-2.5 bg-red-700 hover:bg-red-600 rounded-lg text-sm font-medium" onclick="return confirm('Alle bestehenden Daten dieses Systems werden durch den Import ersetzt. Fortfahren?')">
+                    <i class="fas fa-file-import mr-2"></i>Gesamtsystem importieren
+                </button>
+            </form>
+        </div>
+    </section>
+</div>
+{% endblock %}

@@ -2,199 +2,79 @@
 
 {% block content %}
 <div class="w-full">
-    <h1 class="text-2xl font-semibold mb-6">
+    <h1 class="text-2xl font-semibold mb-2">
         <i class="fas fa-users mr-2"></i>Verwaltung
     </h1>
+    <p class="text-sm text-gray-400 mb-6">Wähle einen Bereich aus, um ihn zu öffnen.</p>
 
-    <section class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6 mb-6">
-        <div class="flex items-start gap-3 mb-4">
-            <i class="fas fa-database text-blue-400 mt-1"></i>
-            <div>
-                <h2 class="font-semibold">Gesamtsystem übertragen</h2>
-                <p class="text-sm text-gray-400 mt-1">Exportiert Benutzer, Lager, Geräte, Cases, Ausleihen, Events, Berechtigungen und Etikettenlayouts in eine ZIP-Datei. Der Export kann in eine andere DMS-Installation importiert werden.</p>
-                <p class="text-xs text-amber-300 mt-2">Ein Import ersetzt die vorhandenen Daten dieses Systems vollständig. Vorher wird automatisch eine Sicherung auf dem Server angelegt. Die Exportdatei enthält auch Passwort-Hashes und sollte vertraulich behandelt werden.</p>
-            </div>
-        </div>
-        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <div class="border border-gray-800 rounded-lg p-4">
-                <h3 class="text-sm font-medium mb-3">Gesamtexport herunterladen</h3>
-                <a href="{{ url_for('admin_system_export') }}" class="inline-flex items-center px-4 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium">
-                    <i class="fas fa-file-export mr-2"></i>DMS-Systemexport herunterladen
-                </a>
-            </div>
-            <form method="POST" action="{{ url_for('admin_system_import') }}" enctype="multipart/form-data" class="border border-red-900/60 rounded-lg p-4">
-                <h3 class="text-sm font-medium mb-2">Systemexport importieren</h3>
-                <label for="backup_file" class="block text-xs text-gray-400 mb-2">DMS-Systemexport (.zip, maximal 512 MB)</label>
-                <input type="file" id="backup_file" name="backup_file" accept=".zip,application/zip" required class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100 mb-3">
-                <label for="confirm_text" class="block text-xs text-gray-400 mb-2">Zum Bestätigen ERSETZEN eingeben</label>
-                <input type="text" id="confirm_text" name="confirm_text" autocomplete="off" required class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:outline-none mb-3">
-                <button type="submit" class="inline-flex items-center px-4 py-2.5 bg-red-700 hover:bg-red-600 rounded-lg text-sm font-medium" onclick="return confirm('Alle bestehenden Daten dieses Systems werden durch den Import ersetzt. Fortfahren?')">
-                    <i class="fas fa-file-import mr-2"></i>Gesamtsystem importieren
-                </button>
-            </form>
-        </div>
-    </section>
-
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <!-- Neuer Benutzer -->
-        <div class="xl:col-span-1">
-            <form method="POST" action="{{ url_for('create_user') }}" class="bg-gray-900 border border-gray-800 p-6 rounded-xl">
-                <h2 class="text-sm font-medium mb-4">Benutzer anlegen</h2>
-
-                <label class="block text-xs text-gray-400 mb-2" for="new_user_id">Benutzer-ID</label>
-                <input type="text" id="new_user_id" name="user_id" placeholder="z. B. TMS-Muster"
-                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-3" required>
-
-                <label class="block text-xs text-gray-400 mb-2" for="new_name">Name</label>
-                <input type="text" id="new_name" name="name" placeholder="Vor- und Nachname"
-                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-3" required>
-
-                <label class="block text-xs text-gray-400 mb-2" for="new_password">Passwort</label>
-                <input type="password" id="new_password" name="password" placeholder="Passwort"
-                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-3" required>
-
-                <label class="block text-xs text-gray-400 mb-2" for="new_role">Rolle</label>
-                <select id="new_role" name="role" class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-4">
-                    <option value="user">Benutzer</option>
-                    <option value="admin">Admin</option>
-                </select>
-
-                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 p-3 rounded-lg font-medium transition">
-                    <i class="fas fa-user-plus mr-2"></i>Benutzer anlegen
-                </button>
-            </form>
-        </div>
-
-        <!-- Benutzerliste -->
-        <div class="xl:col-span-2">
-            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div class="px-4 py-3 border-b border-gray-800 text-sm font-medium">Benutzer</div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="text-gray-500 text-left">
-                            <tr>
-                                <th class="px-4 py-3 font-medium">Benutzer-ID</th>
-                                <th class="px-4 py-3 font-medium">Name</th>
-                                <th class="px-4 py-3 font-medium">Rolle</th>
-                                <th class="px-4 py-3 font-medium">Passwort</th>
-                                <th class="px-4 py-3 font-medium text-right">Aktionen</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-800">
-                            {% for user in users %}
-                            <tr>
-                                <td class="px-4 py-3 font-mono text-xs">{{ user[0] }}</td>
-                                <td class="px-4 py-3">{{ user[1] }}</td>
-                                <td class="px-4 py-3">
-                                    <form method="POST" action="{{ url_for('set_user_role', user_id=user[0]) }}" class="flex items-center gap-2">
-                                        <select name="role" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
-                                                onchange="this.form.submit()">
-                                            <option value="user" {% if user[2] != 'admin' %}selected{% endif %}>Benutzer</option>
-                                            <option value="admin" {% if user[2] == 'admin' %}selected{% endif %}>Admin</option>
-                                        </select>
-                                    </form>
-                                </td>
-                                <td class="px-4 py-3">
-                                    {% if user[3] %}
-                                    <span class="text-xs text-gray-400">gesetzt</span>
-                                    {% else %}
-                                    <span class="text-xs text-gray-500">nicht gesetzt</span>
-                                    {% endif %}
-                                </td>
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center justify-end gap-3">
-                                        <form method="POST" action="{{ url_for('reset_user_password', user_id=user[0]) }}" class="flex items-center gap-2">
-                                            <input type="password" name="password" placeholder="Neues Passwort"
-                                                   class="w-32 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs">
-                                            <button type="submit" class="text-gray-400 hover:text-white text-xs" title="Passwort setzen">
-                                                <i class="fas fa-key"></i>
-                                            </button>
-                                        </form>
-                                        {% if user[0] not in (session.user_id, 'TMS-T') %}
-                                        <form method="POST" action="{{ url_for('delete_user', user_id=user[0]) }}"
-                                              onsubmit="return confirm('Benutzer löschen?')">
-                                            <button type="submit" class="text-gray-500 hover:text-red-400 text-xs" title="Löschen">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </form>
-                                        {% endif %}
-                                    </div>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-5">
+        <a href="{{ url_for('verwaltung_system') }}"
+           class="group bg-gray-900 border border-gray-800 hover:border-blue-500/60 rounded-xl p-5 sm:p-6 transition">
+            <div class="flex items-start gap-3">
+                <span class="w-11 h-11 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-database"></i>
+                </span>
+                <div>
+                    <h2 class="font-semibold text-gray-100">Gesamtsystemübertragung</h2>
+                    <p class="text-sm text-gray-400 mt-1">Kompletten Systemexport herunterladen oder eine Sicherung in dieses System importieren.</p>
                 </div>
             </div>
-            <p class="text-xs text-gray-600 mt-3">
-                Lager werden unter „Lager verwalten" für Mitglieder freigegeben.
-            </p>
-        </div>
+            <div class="mt-5 text-xs text-blue-300 group-hover:text-blue-200 inline-flex items-center gap-2">
+                Öffnen <i class="fas fa-arrow-right"></i>
+            </div>
+        </a>
+
+        <a href="{{ url_for('verwaltung_benutzer') }}"
+           class="group bg-gray-900 border border-gray-800 hover:border-emerald-500/60 rounded-xl p-5 sm:p-6 transition">
+            <div class="flex items-start gap-3">
+                <span class="w-11 h-11 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-user-gear"></i>
+                </span>
+                <div>
+                    <h2 class="font-semibold text-gray-100">Benutzer</h2>
+                    <p class="text-sm text-gray-400 mt-1">Benutzer anlegen, Namen bearbeiten, Rollen und Passwörter verwalten.</p>
+                </div>
+            </div>
+            <div class="mt-5 flex items-center justify-between text-xs">
+                <span class="px-2 py-1 rounded-full bg-emerald-600/20 text-emerald-300">{{ user_count }} Benutzer</span>
+                <span class="text-emerald-300 group-hover:text-emerald-200 inline-flex items-center gap-2">Öffnen <i class="fas fa-arrow-right"></i></span>
+            </div>
+        </a>
+
+        <a href="{{ url_for('verwaltung_gruppen') }}"
+           class="group bg-gray-900 border border-gray-800 hover:border-purple-500/60 rounded-xl p-5 sm:p-6 transition">
+            <div class="flex items-start gap-3">
+                <span class="w-11 h-11 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-people-group"></i>
+                </span>
+                <div>
+                    <h2 class="font-semibold text-gray-100">Gruppen</h2>
+                    <p class="text-sm text-gray-400 mt-1">Benutzergruppen und AGs anlegen, Mitglieder zuweisen und bearbeiten.</p>
+                </div>
+            </div>
+            <div class="mt-5 flex items-center justify-between text-xs">
+                <span class="px-2 py-1 rounded-full bg-purple-600/20 text-purple-300">{{ group_count }} Gruppen</span>
+                <span class="text-purple-300 group-hover:text-purple-200 inline-flex items-center gap-2">Öffnen <i class="fas fa-arrow-right"></i></span>
+            </div>
+        </a>
+
+        <a href="{{ url_for('verwaltung_event_requests') }}"
+           class="group bg-gray-900 border border-gray-800 hover:border-pink-500/60 rounded-xl p-5 sm:p-6 transition">
+            <div class="flex items-start gap-3">
+                <span class="w-11 h-11 rounded-xl bg-pink-600/20 text-pink-400 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-calendar-plus"></i>
+                </span>
+                <div>
+                    <h2 class="font-semibold text-gray-100">Event-Anfragen</h2>
+                    <p class="text-sm text-gray-400 mt-1">Öffentliche Event-Anfragen aktivieren und den Anfrage-Link teilen.</p>
+                </div>
+            </div>
+            <div class="mt-5 flex items-center justify-between text-xs">
+                <span class="px-2 py-1 rounded-full bg-pink-600/20 text-pink-300">{{ request_count }} offen</span>
+                <span class="text-pink-300 group-hover:text-pink-200 inline-flex items-center gap-2">Öffnen <i class="fas fa-arrow-right"></i></span>
+            </div>
+        </a>
     </div>
-
-    <section class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6 mt-6">
-        <div class="flex items-start gap-3 mb-4">
-            <i class="fas fa-people-group text-purple-400 mt-1"></i>
-            <div>
-                <h2 class="font-semibold">Benutzergruppen / AGs</h2>
-                <p class="text-sm text-gray-400 mt-1">Gruppen können bei Events als Ganzes freigegeben werden. So erhalten alle Mitglieder gleichzeitig Zugriff.</p>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-            <form method="POST" action="{{ url_for('create_user_group') }}" class="border border-gray-800 rounded-lg p-4">
-                <h3 class="text-sm font-medium mb-3">Neue Gruppe</h3>
-                <label class="block text-xs text-gray-400 mb-2" for="group_name">Gruppenname</label>
-                <input type="text" id="group_name" name="name" placeholder="z. B. AG Technik"
-                       class="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:outline-none mb-3" required>
-                <label class="block text-xs text-gray-400 mb-2">Mitglieder</label>
-                <div class="max-h-52 overflow-y-auto space-y-1 mb-3 border border-gray-800 rounded-lg p-2">
-                    {% for user in users %}
-                    <label class="flex items-center gap-2 text-sm text-gray-300 px-1 py-0.5">
-                        <input type="checkbox" name="member_ids" value="{{ user[0] }}" class="accent-purple-500">
-                        {{ user[1] }} <span class="text-xs text-gray-500">({{ user[0] }})</span>
-                    </label>
-                    {% endfor %}
-                </div>
-                <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 p-2.5 rounded-lg text-sm font-medium">
-                    <i class="fas fa-plus mr-2"></i>Gruppe anlegen
-                </button>
-            </form>
-
-            <div class="xl:col-span-2 space-y-3">
-                {% for group in groups %}
-                <div class="border border-gray-800 rounded-lg p-4">
-                    <form method="POST" action="{{ url_for('edit_user_group', group_id=group.id) }}">
-                        <div class="flex flex-wrap items-center gap-2 mb-3">
-                            <input type="text" name="name" value="{{ group.name }}"
-                                   class="flex-1 min-w-[180px] p-2.5 bg-gray-800 rounded-lg border border-gray-700 focus:outline-none text-sm" required>
-                            <button type="submit" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium">
-                                <i class="fas fa-save mr-1"></i>Speichern
-                            </button>
-                        </div>
-                        <div class="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1 border border-gray-800 rounded-lg p-2">
-                            {% for user in users %}
-                            <label class="flex items-center gap-2 text-sm text-gray-300 px-1 py-0.5">
-                                <input type="checkbox" name="member_ids" value="{{ user[0] }}"
-                                       class="accent-purple-500" {% if user[0] in group.member_ids %}checked{% endif %}>
-                                {{ user[1] }} <span class="text-xs text-gray-500">({{ user[0] }})</span>
-                            </label>
-                            {% endfor %}
-                        </div>
-                    </form>
-                    <form method="POST" action="{{ url_for('delete_user_group', group_id=group.id) }}" class="mt-2"
-                          onsubmit="return confirm('Gruppe wirklich löschen?')">
-                        <button type="submit" class="text-xs text-gray-500 hover:text-red-400">
-                            <i class="fas fa-trash mr-1"></i>Gruppe löschen
-                        </button>
-                    </form>
-                </div>
-                {% else %}
-                <p class="text-sm text-gray-500 border border-gray-800 rounded-lg p-4">Noch keine Gruppen angelegt.</p>
-                {% endfor %}
-            </div>
-        </div>
-    </section>
 
     <a href="{{ base_path }}/dashboard" class="inline-block mt-6 text-sm text-gray-400 hover:text-white">
         <i class="fas fa-arrow-left mr-2"></i>Zurück zum Dashboard

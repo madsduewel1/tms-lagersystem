@@ -208,7 +208,7 @@
             <div class="group-header p-3 sm:p-4 cursor-pointer touch-manipulation" onclick="toggleGroup('{{ loop.index }}')">
                 <div class="flex items-center justify-between gap-2">
                     <div class="flex items-center space-x-2 sm:space-x-3 flex-1 min-w-0">
-                        <i id="group-icon-{{ loop.index }}" class="fas fa-chevron-down text-blue-400 transition-transform text-sm sm:text-base flex-shrink-0"></i>
+                        <i id="group-icon-{{ loop.index }}" class="fas fa-chevron-right text-blue-400 transition-transform text-sm sm:text-base flex-shrink-0"></i>
                         <h3 class="text-sm sm:text-lg font-semibold text-gray-100 truncate">{{ group_name }}</h3>
                         <span class="px-2 sm:px-3 py-0.5 sm:py-1 bg-blue-600 text-blue-100 rounded-full text-xs sm:text-sm font-medium flex-shrink-0">({{ group_devices|sum(attribute=12) }} Stück)</span>
                     </div>
@@ -232,7 +232,7 @@
                 </div>
             </div>
             
-            <div id="group-content-{{ loop.index }}" class="border-t border-gray-800">
+            <div id="group-content-{{ loop.index }}" class="hidden border-t border-gray-800">
                 {% for device in group_devices %}
                 <div class="device-card p-3 sm:p-4 border-b border-gray-800 last:border-b-0 hover:bg-gray-800/50 transition-colors">
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">

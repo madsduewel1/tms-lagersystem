@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="w-full">
+    <a href="{{ url_for('verwaltung') }}" class="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-4">
+        <i class="fas fa-arrow-left"></i>Verwaltung
+    </a>
+    <h1 class="text-2xl font-semibold mb-6">
+        <i class="fas fa-user-gear mr-2"></i>Benutzer
+    </h1>
+
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <!-- Neuer Benutzer -->
+        <div class="xl:col-span-1">
+            <form method="POST" action="{{ url_for('create_user') }}" class="bg-gray-900 border border-gray-800 p-6 rounded-xl">
+                <h2 class="text-sm font-medium mb-4">Benutzer anlegen</h2>
+
+                <label class="block text-xs text-gray-400 mb-2" for="new_user_id">Benutzer-ID</label>
+                <input type="text" id="new_user_id" name="user_id" placeholder="z. B. TMS-Muster"
+                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-3" required>
+
+                <label class="block text-xs text-gray-400 mb-2" for="new_name">Name</label>
+                <input type="text" id="new_name" name="name" placeholder="Vor- und Nachname"
+                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-3" required>
+
+                <label class="block text-xs text-gray-400 mb-2" for="new_password">Passwort</label>
+                <input type="password" id="new_password" name="password" placeholder="Passwort"
+                       class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-3" required>
+
+                <label class="block text-xs text-gray-400 mb-2" for="new_role">Rolle</label>
+                <select id="new_role" name="role" class="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-gray-500 focus:outline-none mb-4">
+                    <option value="user">Benutzer</option>
+                    <option value="admin">Admin</option>
+                </select>
+
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 p-3 rounded-lg font-medium transition">
+                    <i class="fas fa-user-plus mr-2"></i>Benutzer anlegen
+                </button>
+            </form>
+        </div>
+
+        <!-- Benutzerliste -->
+        <div class="xl:col-span-2">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-800 text-sm font-medium">Benutzer</div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="text-gray-500 text-left">
+                            <tr>
+                                <th class="px-4 py-3 font-medium">Benutzer-ID</th>
+                                <th class="px-4 py-3 font-medium">Name</th>
+                                <th class="px-4 py-3 font-medium">Rolle</th>
+                                <th class="px-4 py-3 font-medium">Passwort</th>
+                                <th class="px-4 py-3 font-medium">Erstellt von</th>
+                                <th class="px-4 py-3 font-medium text-right">Aktionen</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-800">
+                            {% for user in users %}
+                            <tr>
+                                <td class="px-4 py-3 font-mono text-xs">{{ user[0] }}</td>
+                                <td class="px-4 py-3">
+                                    <form method="POST" action="{{ url_for('update_user_name', user_id=user[0]) }}" class="flex items-center gap-2">
+                                        <input type="text" name="name" value="{{ user[1] }}" required
+                                               class="w-40 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+                                               aria-label="Vor- und Nachname">
+                                        <button type="submit" class="text-gray-400 hover:text-white text-xs" title="Vor- und Nachnamen speichern">
+                                            <i class="fas fa-save"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <form method="POST" action="{{ url_for('set_user_role', user_id=user[0]) }}" class="flex items-center gap-2">
+                                        <select name="role" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+                                                onchange="this.form.submit()">
+                                            <option value="user" {% if user[2] != 'admin' %}selected{% endif %}>Benutzer</option>
+                                            <option value="admin" {% if user[2] == 'admin' %}selected{% endif %}>Admin</option>
+                                        </select>
+                                    </form>
+                                </td>
+                                <td class="px-4 py-3">
+                                    {% if user[3] %}
+                                    <span class="text-xs text-gray-400">gesetzt</span>
+                                    {% else %}
+                                    <span class="text-xs text-gray-500">nicht gesetzt</span>
+                                    {% endif %}
+                                </td>
+                                <td class="px-4 py-3 text-xs text-gray-400">{{ user[4] or '—' }}</td>
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center justify-end gap-3">
+                                        <form method="POST" action="{{ url_for('reset_user_password', user_id=user[0]) }}" class="flex items-center gap-2">
+                                            <input type="password" name="password" placeholder="Neues Passwort"
+                                                   class="w-32 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs">
+                                            <button type="submit" class="text-gray-400 hover:text-white text-xs" title="Passwort setzen">
+                                                <i class="fas fa-key"></i>
+                                            </button>
+                                        </form>
+                                        {% if user[0] not in (session.user_id, 'TMS-T') %}
+                                        <form method="POST" action="{{ url_for('delete_user', user_id=user[0]) }}"
+                                              onsubmit="return confirm('Benutzer löschen?')">
+                                            <button type="submit" class="text-gray-500 hover:text-red-400 text-xs" title="Löschen">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <p class="text-xs text-gray-600 mt-3">
+                Lager werden unter „Lager verwalten" für Mitglieder freigegeben.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}

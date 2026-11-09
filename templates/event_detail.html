@@ -27,6 +27,10 @@
                class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
                 <i class="fas fa-file-pdf mr-2 text-red-400"></i>Materialliste PDF
             </a>
+            <a href="{{ base_path }}/events/{{ event.id }}/contract.pdf"
+               class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+                <i class="fas fa-file-signature mr-2 text-emerald-400"></i>Verleihvertrag PDF
+            </a>
             {% if can_edit %}
             <a href="{{ base_path }}/events/{{ event.id }}/edit"
                class="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">

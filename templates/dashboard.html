@@ -16,7 +16,7 @@
 
     {% if session.role == 'admin' %}
     <!-- Quick Actions -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
         <a href="{{ base_path }}/manage_lager" class="action-card">
             <span class="inline-flex w-11 h-11 items-center justify-center rounded-lg bg-blue-500/10"><i class="fas fa-cog text-xl text-blue-400"></i></span>
             <h2 class="text-sm font-medium mt-3 text-gray-200">Lager verwalten</h2>
@@ -29,11 +29,6 @@
             <p class="text-xs text-gray-500 mt-1">Benutzer anlegen, Passwörter und Rollen verwalten</p>
         </a>
 
-        <a href="{{ base_path }}/create_lager" class="action-card">
-            <span class="inline-flex w-11 h-11 items-center justify-center rounded-lg bg-emerald-500/10"><i class="fas fa-plus text-xl text-emerald-400"></i></span>
-            <h2 class="text-sm font-medium mt-3 text-gray-200">Neues Lager</h2>
-            <p class="text-xs text-gray-500 mt-1">Ein neues Lager anlegen</p>
-        </a>
     </div>
     {% endif %}
 
@@ -77,6 +72,53 @@
         {% endif %}
     </div>
 
+    {% if event_requests %}
+    <!-- Event-Anfragen -->
+    <div class="w-full mb-10">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h3 class="text-sm font-medium text-gray-400 uppercase tracking-widest">Event-Anfragen</h3>
+            <span class="px-2 py-1 rounded-full bg-pink-600/20 text-pink-300 text-xs">{{ event_requests|length }} offen</span>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {% for item in event_requests %}
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <h4 class="font-semibold text-gray-100">{{ item[1] }}</h4>
+                        <p class="text-xs text-gray-500 mt-1">
+                            Eingegangen: {{ item[10] }}{% if item[2] %} · {{ item[2] }}{% endif %}
+                        </p>
+                    </div>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide bg-pink-600/20 border border-pink-500/30 text-pink-300">Neu</span>
+                </div>
+
+                <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-400">
+                    <div><i class="fas fa-clock text-gray-600 w-4 mr-1"></i>{{ item[7] or 'Kein Termin' }}{% if item[8] %} – {{ item[8] }}{% endif %}</div>
+                    <div><i class="fas fa-location-dot text-gray-600 w-4 mr-1"></i>{{ item[6] or 'Kein Ort' }}</div>
+                    <div><i class="fas fa-user text-gray-600 w-4 mr-1"></i>{{ item[3] }}</div>
+                    <div><i class="fas fa-envelope text-gray-600 w-4 mr-1"></i>{{ item[4] or '—' }}</div>
+                </div>
+                {% if item[9] %}
+                <p class="text-xs text-gray-500 mt-3 line-clamp-2">{{ item[9] }}</p>
+                {% endif %}
+
+                <div class="flex flex-wrap gap-2 mt-4">
+                    <a href="{{ url_for('event_create', request_id=item[0]) }}"
+                       class="px-3 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg text-xs font-medium">
+                        <i class="fas fa-calendar-plus mr-1"></i>In Event umwandeln
+                    </a>
+                    <form method="POST" action="{{ url_for('event_request_done', request_id=item[0]) }}">
+                        <button type="submit" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-xs">
+                            <i class="fas fa-check mr-1"></i>Erledigt
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Lager Section -->
     <div class="w-full">
         <h3 class="text-sm font-medium text-gray-400 uppercase tracking-widest mb-4">Meine Lager</h3>
@@ -100,9 +142,7 @@
             <i class="fas fa-warehouse text-4xl text-gray-700"></i>
             <p class="text-gray-400 text-sm mt-4">Noch keine Lager vorhanden</p>
             {% if session.role == 'admin' %}
-            <a href="{{ base_path }}/create_lager" class="empty-cta">
-                <i class="fas fa-plus mr-2"></i>Lager erstellen
-            </a>
+            <p class="text-gray-600 text-xs mt-1">Lager können unter „Lager verwalten“ angelegt werden.</p>
             {% else %}
             <p class="text-gray-600 text-xs mt-1">Ein Administrator muss dir ein Lager freigeben.</p>
             {% endif %}

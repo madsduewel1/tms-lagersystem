@@ -17,6 +17,7 @@
     </div>
 
     <form method="POST" id="eventForm" class="space-y-6">
+        <input type="hidden" name="request_id" value="{{ request_id|default('') }}">
         <!-- Grunddaten -->
         <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 sm:p-6">
             <h2 class="text-sm font-medium text-gray-300 mb-4 flex items-center gap-2">

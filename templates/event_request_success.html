@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto py-10">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
+        <i class="fas fa-circle-check text-4xl text-emerald-400"></i>
+        <h1 class="text-xl font-semibold mt-4">Anfrage erfolgreich gesendet</h1>
+        <p class="text-sm text-gray-400 mt-2">Vielen Dank. Deine Event-Anfrage ist bei uns eingegangen. Wir melden uns bei dir.</p>
+        <a href="{{ url_for('event_request') }}"
+           class="inline-flex items-center mt-6 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm">
+            <i class="fas fa-plus mr-2"></i>Weitere Anfrage senden
+        </a>
+    </div>
+</div>
+{% endblock %}

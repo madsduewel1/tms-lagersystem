@@ -121,7 +121,7 @@
     <a id="inventory-word-label-export" href="{{ base_path }}/export?format=word_labels&source=inventory" 
        class="group relative overflow-hidden bg-gray-700 p-4 rounded-2xl text-center font-semibold transition-all duration-300 -hover">
         <div class="absolute inset-0 bg-gray-700 hidden"></div>
-        <i class="fas fa-file-word mr-2"></i>Word-Etiketten für Auswahl
+        <i class="fas fa-file-word mr-2"></i>Etiketten für Auswahl (Word)
     </a>
 </div>
 
@@ -132,7 +132,7 @@
             <div class="group-header p-4 cursor-pointer" onclick="toggleGroup('{{ loop.index }}')">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-3">
-                        <i id="group-icon-{{ loop.index }}" class="fas fa-chevron-down text-green-400 transition-transform"></i>
+                        <i id="group-icon-{{ loop.index }}" class="fas fa-chevron-right text-green-400 transition-transform"></i>
                         <h3 class="text-lg font-semibold text-gray-100">{{ group_name }}</h3>
                         <span class="px-3 py-1 bg-green-600 text-green-100 rounded-full text-sm font-medium">({{ group_devices|length }})</span>
                     </div>
@@ -156,7 +156,7 @@
                 </div>
             </div>
             
-            <div id="group-content-{{ loop.index }}" class="border-t border-gray-800">
+            <div id="group-content-{{ loop.index }}" class="hidden border-t border-gray-800">
                 {% for device in group_devices %}
                 <div class="device-card p-4 border-b border-gray-800 last:border-b-0 hover:bg-gray-800/50 transition-colors">
                     <div class="flex justify-between items-start">
